@@ -2,6 +2,8 @@
 
 A free music player for Windows. Search and play music from YouTube Music, YouTube and SoundCloud in one app, with no ads and no subscriptions.
 
+Website: [surse231.github.io/jeem](https://surse231.github.io/jeem/)
+
 ## Features
 
 - One search across YouTube Music, YouTube and SoundCloud
