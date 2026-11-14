@@ -261,6 +261,29 @@ pub async fn search(ctx: &Arc<Ctx>, query: &str, platform: &str, limit: usize, o
     json!({ "success": true, "tracks": tracks, "hasMore": offset + limit < pool.len() })
 }
 
+/// YouTube search returns every kind of video. Podcasts, interviews, shows, streams and very long or very short videos are not music
+/// (podcasts have their own section), so they are dropped from the music search.
+fn is_not_music(t: &Value, max_secs: f64) -> bool {
+    let dur = t.get("duration").and_then(Value::as_f64).unwrap_or(0.0);
+    if dur > 0.0 && (dur > max_secs || dur < 30.0) {
+        return true;
+    }
+    let words = |s: &str| -> String {
+        let low = s.to_lowercase();
+        format!(" {} ", low.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" "))
+    };
+    let title = words(text(t.get("title")));
+    let who = words(text(t.get("artist")));
+    const TITLE: [&str; 52] = [
+        "podcast", "podcasts", "подкаст", "подкасты", "интервью", "interview", "interviews", "выпуск", "выпуска", "эпизод", "episode", "full episode", "full show",
+        "reaction", "реакция", "обзор", "review", "влог", "vlog", "стрим", "livestream", "live stream", "news", "новости", "лекция", "lecture", "documentary",
+        "документальный", "ток шоу", "talk show", "shorts", "tutorial", "урок", "разбор", "сериал", "серия", "behind the scenes", "making of", "за кадром",
+        "trailer", "трейлер", "gameplay", "прохождение", "как стать", "топ 10", "top 10", "speech", "речь", "q a", "ask me anything", "stand up", "стендап",
+    ];
+    const CHANNEL: [&str; 8] = ["podcast", "подкаст", "news", "новости", "tv show", "talk show", "stand up", "стендап"];
+    TITLE.iter().any(|w| title.contains(&format!(" {w} "))) || CHANNEL.iter().any(|w| who.contains(&format!(" {w} ")))
+}
+
 async fn search_pool(ctx: &Arc<Ctx>, platform: &str, q: &str) -> Vec<Value> {
     let key = format!("{platform}:{}", q.to_lowercase());
     let cached = {
@@ -270,14 +293,17 @@ async fn search_pool(ctx: &Arc<Ctx>, platform: &str, q: &str) -> Vec<Value> {
     if let Some(p) = cached {
         return p;
     }
-    let pool = match platform {
+    let mut pool = match platform {
         "soundcloud" => ytdlp_search(ctx, "scsearch", q, 30, "soundcloud").await,
-        "youtube" => ytdlp_search(ctx, "ytsearch", q, 30, "youtube").await,
+        "youtube" => ytdlp_search(ctx, "ytsearch", q, 40, "youtube").await,
         _ => {
             let songs = ytm_search(ctx, q).await.unwrap_or_default();
-            if songs.is_empty() { ytdlp_search(ctx, "ytsearch", q, 30, "youtube").await } else { songs }
+            if songs.is_empty() { ytdlp_search(ctx, "ytsearch", q, 40, "youtube").await } else { songs }
         }
     };
+    // SoundCloud keeps DJ sets and long tracks up to 20 minutes; YouTube music videos rarely run longer than 11.
+    let max_secs = if platform == "soundcloud" { 1200.0 } else { 660.0 };
+    pool.retain(|t| !is_not_music(t, max_secs));
     if !pool.is_empty() {
         ctx.search_cache.lock().unwrap().insert(key, (Instant::now(), pool.clone()));
     }
@@ -444,6 +470,169 @@ fn merge_pools(pools: &[Vec<Value>]) -> Vec<Value> {
 
 fn format_listeners(n: u64) -> String {
     if n >= 1_000_000 { format!("{:.1}M", n as f64 / 1e6) } else if n >= 1000 { format!("{}K", n / 1000) } else { n.to_string() }
+}
+
+fn find_all<'a>(v: &'a Value, key: &str, out: &mut Vec<&'a Value>) {
+    match v {
+        Value::Object(m) => {
+            for (k, x) in m {
+                if k == key {
+                    out.push(x);
+                } else {
+                    find_all(x, key, out);
+                }
+            }
+        }
+        Value::Array(a) => a.iter().for_each(|x| find_all(x, key, out)),
+        _ => {}
+    }
+}
+
+/// "Song (Official Music Video)" -> "Song", and "Artist - Song" -> "Song" when the artist is already known.
+fn clean_chart_title(title: &str, artist: &str) -> String {
+    let mut out = String::new();
+    let mut depth = 0usize;
+    let mut chunk = String::new();
+    let junk = ["official", "video", "клип", "lyric", "audio", "mv", "m/v", "hd", "4k"];
+    for c in title.chars() {
+        match c {
+            '(' | '[' => {
+                if depth == 0 {
+                    chunk.clear();
+                }
+                depth += 1;
+                chunk.push(c);
+            }
+            ')' | ']' if depth > 0 => {
+                chunk.push(c);
+                depth -= 1;
+                if depth == 0 {
+                    let low = chunk.to_lowercase();
+                    if !junk.iter().any(|j| low.contains(j)) {
+                        out.push_str(&chunk);
+                    }
+                    chunk.clear();
+                }
+            }
+            _ if depth > 0 => chunk.push(c),
+            _ => out.push(c),
+        }
+    }
+    out.push_str(&chunk);
+    let mut out = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    let prefix = format!("{} - ", artist.to_lowercase());
+    if out.to_lowercase().starts_with(&prefix) {
+        out = out[prefix.len()..].trim().to_string();
+    }
+    if out.is_empty() { title.to_string() } else { out }
+}
+
+/// The video charts also hold TV shows, live sessions and clips from broadcaster channels; those are not tracks.
+fn is_broadcast_upload(title: &str, artist: &str) -> bool {
+    let a = artist.to_lowercase();
+    let t = title.to_lowercase();
+    const CHANNELS: [&str; 16] = [
+        "kbs", "sbs", "mbc", "tonight show", "triple j", "mosh pit", "entertainment", "news", "tv", "show", "official channel", "late night", "live session",
+        "podcast", "episode", "trailer",
+    ];
+    CHANNELS.iter().any(|c| {
+        if c.len() <= 3 {
+            a.split(|ch: char| !ch.is_alphanumeric()).any(|w| w == *c)
+        } else {
+            a.contains(c)
+        }
+    }) || title.contains('#') || t.contains(" | ") || t.contains("full episode") || t.contains("reaction")
+}
+
+/// The official YouTube Music chart of a country (ISO code, e.g. "RU"); unsupported countries get the global chart.
+pub async fn yt_chart(ctx: &Ctx, country: &str) -> (String, Vec<Value>) {
+    let code: String = country.trim().to_uppercase().chars().filter(|c| c.is_ascii_alphabetic()).take(2).collect();
+    let code = if code.len() == 2 { code } else { "ZZ".to_string() };
+    let key = format!("chart:{code}");
+    if let Some((t, v)) = ctx.search_cache.lock().unwrap().get(&key) {
+        if t.elapsed() < Duration::from_secs(6 * 3600) {
+            let name = v.first().map(|f| text(f.get("chartName")).to_string()).unwrap_or_default();
+            return (name, v.clone());
+        }
+    }
+    let browse = |body: Value| async move {
+        ctx.client
+            .post("https://music.youtube.com/youtubei/v1/browse?prettyPrint=false")
+            .header("Origin", "https://music.youtube.com")
+            .header("Referer", "https://music.youtube.com/")
+            .header("User-Agent", UA)
+            .timeout(Duration::from_secs(12))
+            .json(&body)
+            .send()
+            .await
+            .ok()?
+            .json::<Value>()
+            .await
+            .ok()
+    };
+    let ctx_json = json!({ "client": { "clientName": "WEB_REMIX", "clientVersion": "1.20250101.01.00", "hl": "en", "gl": "US" } });
+    let Some(root) = browse(json!({ "context": ctx_json, "browseId": "FEmusic_charts", "formData": { "selectedValues": [code] } })).await else {
+        return (String::new(), Vec::new());
+    };
+    let mut buttons = Vec::new();
+    find_all(&root, "musicSortFilterButtonRenderer", &mut buttons);
+    let chart_name = buttons.first().map(|b| text(b.pointer("/title/runs/0/text")).to_string()).unwrap_or_default();
+    let mut cards = Vec::new();
+    find_all(&root, "musicTwoRowItemRenderer", &mut cards);
+    let mut best: Option<String> = None;
+    for c in &cards {
+        let title = text(c.pointer("/title/runs/0/text"));
+        let id = text(c.pointer("/title/runs/0/navigationEndpoint/browseEndpoint/browseId"));
+        if id.is_empty() {
+            continue;
+        }
+        if title.contains("Top 100") {
+            best = Some(id.to_string());
+            break;
+        }
+        if best.is_none() && !title.contains("Trending") {
+            best = Some(id.to_string());
+        }
+    }
+    let Some(pl) = best else { return (chart_name, Vec::new()) };
+    let Some(list) = browse(json!({ "context": ctx_json, "browseId": pl })).await else { return (chart_name, Vec::new()) };
+    let mut rows = Vec::new();
+    find_all(&list, "musicResponsiveListItemRenderer", &mut rows);
+    let mut out: Vec<Value> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for r in rows {
+        let id = text(r.pointer("/playlistItemData/videoId"));
+        if id.is_empty() || !seen.insert(id.to_string()) {
+            continue;
+        }
+        let col = |i: usize| -> String {
+            r.pointer(&format!("/flexColumns/{i}/musicResponsiveListItemFlexColumnRenderer/text/runs"))
+                .and_then(Value::as_array)
+                .map(|runs| runs.iter().map(|x| text(x.get("text"))).collect::<String>())
+                .unwrap_or_default()
+        };
+        let raw_title = col(0);
+        let artist = col(1);
+        let artist = artist.strip_suffix(" - Topic").unwrap_or(&artist).trim().to_string();
+        if raw_title.is_empty() || is_broadcast_upload(&raw_title, &artist) {
+            continue;
+        }
+        let title = clean_chart_title(&raw_title, &artist);
+        let dur = text(r.pointer("/fixedColumns/0/musicResponsiveListItemFixedColumnRenderer/text/runs/0/text"));
+        let thumb = format!("https://i.ytimg.com/vi/{id}/hqdefault.jpg");
+        let mut item = track(id, &title, if artist.is_empty() { "Unknown Artist" } else { &artist }, "", parse_duration(dur), &thumb, false);
+        item["platform"] = json!("ytmusic");
+        item["chartPosition"] = json!(out.len() + 1);
+        item["chartName"] = json!(chart_name);
+        out.push(item);
+        if out.len() >= 50 {
+            break;
+        }
+    }
+    if !out.is_empty() {
+        ctx.search_cache.lock().unwrap().insert(key, (Instant::now(), out.clone()));
+    }
+    (chart_name, out)
 }
 
 pub async fn deezer_chart(ctx: &Ctx, limit: usize) -> Vec<Value> {
@@ -832,6 +1021,59 @@ async fn dz_releases(ctx: &Ctx, id: u64, artist_name: &str) -> Vec<Value> {
     }
     list.sort_by(|a, b| b.0.cmp(&a.0));
     list.into_iter().map(|(_, v)| v).collect()
+}
+
+/// Newest releases of the given artists (up to three per artist), newest first. The caller keeps only the fresh ones.
+pub async fn new_releases(ctx: &Ctx, artists: &[String]) -> Vec<Value> {
+    let mut handles = Vec::new();
+    for name in artists.iter().take(14) {
+        let client = ctx.client.clone();
+        let name = name.replace(" - Topic", "").trim().to_string();
+        if name.is_empty() {
+            continue;
+        }
+        handles.push(tauri::async_runtime::spawn(async move {
+            let want: String = name.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect();
+            let search = format!("https://api.deezer.com/search/artist?q={}&limit=5", urlencode(&name));
+            let root: Value = client.get(search).timeout(Duration::from_secs(8)).send().await.ok()?.json().await.ok()?;
+            let hit = root.get("data").and_then(Value::as_array)?.iter().find(|a| {
+                let got: String = text(a.get("name")).to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect();
+                got == want
+            })?;
+            let id = hit.get("id").and_then(Value::as_u64)?;
+            let display = text(hit.get("name")).to_string();
+            let url = format!("https://api.deezer.com/artist/{id}/albums?limit=25");
+            let v: Value = client.get(url).timeout(Duration::from_secs(8)).send().await.ok()?.json().await.ok()?;
+            let mut out: Vec<Value> = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            for it in v.get("data").and_then(Value::as_array).cloned().unwrap_or_default() {
+                let title = text(it.get("title")).to_string();
+                let date = text(it.get("release_date")).to_string();
+                let key: String = title.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect();
+                if title.is_empty() || date.is_empty() || !seen.insert(key) {
+                    continue;
+                }
+                let cover = ["cover_xl", "cover_big", "cover_medium"].iter().map(|k| text(it.get(*k))).find(|s| !s.is_empty()).unwrap_or("").to_string();
+                out.push(json!({
+                    "id": it.get("id").and_then(Value::as_u64).map(|n| n.to_string()).unwrap_or_default(),
+                    "title": title, "artist": display, "cover": cover,
+                    "year": date.chars().take(4).collect::<String>(), "releaseDate": date,
+                    "recordType": text(it.get("record_type")), "source": "deezer"
+                }));
+            }
+            out.sort_by(|a, b| text(b.get("releaseDate")).cmp(text(a.get("releaseDate"))));
+            out.truncate(3);
+            Some(out)
+        }));
+    }
+    let mut all: Vec<Value> = Vec::new();
+    for h in handles {
+        if let Ok(Some(list)) = h.await {
+            all.extend(list);
+        }
+    }
+    all.sort_by(|a, b| text(b.get("releaseDate")).cmp(text(a.get("releaseDate"))));
+    all
 }
 
 /// Every track from the artist's releases, newest release first.

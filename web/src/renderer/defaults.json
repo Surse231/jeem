@@ -125,7 +125,7 @@
   "jeem_audio_quality": "high",
   "jeem_adv_classic_sidebar": "false",
   "jeem_sidebar_order": "[\"wave\",\"favorites\",\"playlists\",\"podcasts\"]",
-  "jeem_home_order": "[\"sp-quick-sec\",\"sp-trend-sec\",\"sp-artists-sec\"]",
+  "jeem_home_order": "[\"sp-quick-sec\",\"sp-trend-sec\",\"sp-releases-sec\",\"sp-artists-sec\"]",
   "jeem_user_initialized_v1": "1",
   "jeem_flat_prog_default_v1": "1",
   "jeem_defaults_v44_applied": "1",

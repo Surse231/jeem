@@ -184,7 +184,7 @@ const EXCLUDED_PERSONAL_KEYS = new Set([
   'jeem_local_tracks', 'jeem_local_files', 'devsize_local_tracks', 'devsize_local_files',
   'jeem_saved_albums', 'jeem_search_history_v2', 'jeem_favorite_artists',
   'jeem_unfollowed_artists', 'jeem_artist_meta_cache', 'jeem_daily_mixes',
-  'jeem_my_wave_cache', 'jeem_trending_cache', 'jeem_wave_skips',
+  'jeem_my_wave_cache', 'jeem_trending_cache', 'jeem_new_releases', 'jeem_wave_skips',
   'jeem_failed_tracks', 'jeem_mix_feedback', 'jeem_pinned_tracks',
   'jeem_sidebar_pinned_tracks', 'jeem_pinned_playlists', 'jeem_user_nickname',
   'jeem_user_avatar', 'jeem_user_banner', 'jeem_artist_listen', 'jeem_listen_extra', 'jeem_lastfm_sk', 'jeem_lastfm_user',
@@ -6601,6 +6601,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       'Jump back in': 'Недавно слушали',
       'Home': 'Главная',
       'Trending now': 'Сейчас в тренде',
+      'New releases': 'Новые релизы',
+      'By region': 'По региону',
+      'Automatic': 'Автоматически',
+      'Charts and new tracks follow this country': 'Чарты и новые треки подбираются по этой стране',
+      'Single': 'Сингл',
+      'Album': 'Альбом',
       'Favorite artists': 'Любимые артисты',
       'Liked songs': 'Любимые треки',
       'Favorites': 'Избранное',
@@ -6781,6 +6787,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       'Jump back in': 'Нещодавно слухали',
       'Home': 'Головна',
       'Trending now': 'Зараз у тренді',
+      'New releases': 'Нові релізи',
+      'By region': 'За регіоном',
+      'Automatic': 'Автоматично',
+      'Charts and new tracks follow this country': 'Чарти й нові треки добираються за цією країною',
+      'Single': 'Сингл',
+      'Album': 'Альбом',
       'Favorite artists': 'Улюблені виконавці',
       'Liked songs': 'Улюблені треки',
       'Favorites': 'Обране',
@@ -27027,6 +27039,7 @@ function bindCoverHoldZoom(wrapEl) {
         seeds: profile.seeds,
         avoid: { ids: Array.from(ids), keys: baseAvoid.keys || [], artists: baseAvoid.artists || [] },
         settings: getWaveSettings(),
+        region: detectUserMusicRegion(),
         knownArtists: waveKnownArtists()
       })
     });
@@ -27037,6 +27050,35 @@ function bindCoverHoldZoom(wrapEl) {
       return !(k && skipKeys.has(String(k).toLowerCase())) && !(state.queue || []).some(q => isSameTrack(q, t));
     });
     return waveMixFavorites(fresh);
+  }
+
+  /* Throw away the tracks that have not played yet and pick new ones with the latest like or dislike taken into account. */
+  let waveRebuildToken = 0;
+  let waveRebuildBackup = null;
+  let waveRebuildPlayNext = false;
+  async function rebuildWaveQueue(thenPlayNext, dropArtist) {
+    const token = ++waveRebuildToken;
+    if (!waveRebuildBackup) waveRebuildBackup = state.queue.slice();
+    if (thenPlayNext) waveRebuildPlayNext = true;
+    const keep = Math.max(0, (state.queueIndex || 0) + 1);
+    state.queue = waveRebuildBackup.slice(0, keep);
+    let tracks = [];
+    try { tracks = await fetchWaveTracks(12); } catch (_) {}
+    if (token !== waveRebuildToken) return;
+    if (dropArtist) {
+      const bad = String(dropArtist).toLowerCase().split(/[,;&]/).map(a => a.trim()).filter(Boolean);
+      const kept = tracks.filter(t => !bad.some(b => String(t.artist || '').toLowerCase().includes(b)));
+      if (kept.length) tracks = kept;
+    }
+    if (tracks.length && state.myWaveActive) state.queue.push(...tracks);
+    else state.queue = waveRebuildBackup;
+    const play = waveRebuildPlayNext;
+    waveRebuildBackup = null;
+    waveRebuildPlayNext = false;
+    updateQueueBadge();
+    if (typeof renderQueueView === 'function') renderQueueView();
+    if (typeof window.refreshQueuePanel === 'function') window.refreshQueuePanel();
+    if (play) playNext();
   }
 
   function isWavePlaying() {
@@ -27065,6 +27107,33 @@ function bindCoverHoldZoom(wrapEl) {
     }
   }
 
+  function regionName(code) {
+    const lang = localStorage.getItem('jeem_ui_lang') || 'en';
+    try { return new Intl.DisplayNames([lang, 'en'], { type: 'region' }).of(code) || code; } catch (_) { return code; }
+  }
+
+  function renderWaveRegionGroup() {
+    const forced = (localStorage.getItem('jeem_region_override') || '').toUpperCase();
+    const auto = detectUserMusicRegion(true);
+    const names = CHART_COUNTRIES.map(c => [c, regionName(c)]).sort((a, b) => a[1].localeCompare(b[1]));
+    const options = [`<option value=""${forced ? '' : ' selected'}>${escapeHtml(t('Automatic'))} · ${escapeHtml(regionName(auto))}</option>`]
+      .concat(names.map(([c, n]) => `<option value="${c}"${forced === c ? ' selected' : ''}>${escapeHtml(n)}</option>`));
+    return `
+      <div class="wave-group">
+        <div class="wave-group-title">${escapeHtml(t('By region'))}</div>
+        <select class="wave-select" id="wave-region-select" aria-label="${escapeHtml(t('By region'))}">${options.join('')}</select>
+        <div class="wave-hint">${escapeHtml(t('Charts and new tracks follow this country'))}</div>
+      </div>`;
+  }
+
+  function applyWaveRegionChange() {
+    ['jeem_trending_cache', 'jeem_trending_region'].forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
+    try { if (window.HomeCache && window.HomeCache.store) delete window.HomeCache.store['home_trending']; } catch (_) {}
+    const row = document.getElementById('sp-trend');
+    if (row) row._lastHomeSig = '';
+    try { renderTrending(); } catch (_) {}
+  }
+
   function renderWaveSettings() {
     const box = document.getElementById('wave-settings');
     if (!box) return;
@@ -27073,7 +27142,18 @@ function bindCoverHoldZoom(wrapEl) {
       <div class="wave-group">
         <div class="wave-group-title">${escapeHtml(t(g.title))}</div>
         <div class="wave-chips">${g.options.map(([val, label]) => `<button type="button" class="wave-chip${cur[g.key] === val ? ' active' : ''}" data-group="${g.key}" data-val="${val}">${escapeHtml(t(label))}</button>`).join('')}</div>
-      </div>`).join('') + `<button type="button" class="btn-outline-pill wave-reset" id="btn-wave-reset"><span>${escapeHtml(t('Reset'))}</span></button>`;
+      </div>`).join('') + renderWaveRegionGroup() + `<button type="button" class="btn-outline-pill wave-reset" id="btn-wave-reset"><span>${escapeHtml(t('Reset'))}</span></button>`;
+    const regionSel = box.querySelector('#wave-region-select');
+    if (regionSel) regionSel.addEventListener('change', () => {
+      try {
+        if (regionSel.value) localStorage.setItem('jeem_region_override', regionSel.value);
+        else localStorage.removeItem('jeem_region_override');
+      } catch (_) {}
+      applyWaveRegionChange();
+      renderWaveSettings();
+      if (state.myWaveActive) startWave();
+      else renderWavePage();
+    });
     box.querySelectorAll('.wave-chip').forEach(chip => {
       chip.addEventListener('click', () => {
         const s = getWaveSettings();
@@ -27086,7 +27166,8 @@ function bindCoverHoldZoom(wrapEl) {
     });
     const reset = box.querySelector('#btn-wave-reset');
     if (reset) reset.addEventListener('click', () => {
-      try { localStorage.removeItem(WAVE_SETTINGS_KEY); } catch (_) {}
+      try { localStorage.removeItem(WAVE_SETTINGS_KEY); localStorage.removeItem('jeem_region_override'); } catch (_) {}
+      applyWaveRegionChange();
       renderWaveSettings();
       if (state.myWaveActive) startWave();
       else renderWavePage();
@@ -27135,14 +27216,20 @@ function bindCoverHoldZoom(wrapEl) {
       if (open) renderWaveSettings();
     });
     const like = document.getElementById('btn-wave-like');
-    if (like) like.addEventListener('click', () => { if (state.currentTrack) { toggleFavoriteTrack(state.currentTrack); renderWavePage(); } });
+    if (like) like.addEventListener('click', () => {
+      if (!state.currentTrack) return;
+      const wasLiked = state.favorites.some(f => isSameTrack(f, state.currentTrack));
+      toggleFavoriteTrack(state.currentTrack);
+      renderWavePage();
+      if (!wasLiked && state.myWaveActive) rebuildWaveQueue(false);
+    });
     const dislike = document.getElementById('btn-wave-dislike');
     if (dislike) dislike.addEventListener('click', () => {
       if (!state.currentTrack) return;
-      recordWaveSkip(state.currentTrack);
+      recordWaveSkip(state.currentTrack, 2);
       state._skipRecordedFor = (typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(state.currentTrack) : '') || state.currentTrack.id;
       showToast(t('Got it, fewer tracks like this'));
-      playNext();
+      if (state.myWaveActive) rebuildWaveQueue(true, state.currentTrack.artist); else playNext();
     });
     if (el.nativeAudio) ['play', 'playing', 'pause', 'ended', 'loadedmetadata'].forEach(ev => el.nativeAudio.addEventListener(ev, () => {
       if (state.currentView === 'wave') renderWavePage();
@@ -29156,13 +29243,13 @@ function bindCoverHoldZoom(wrapEl) {
     }
   }
 
-  function recordWaveSkip(track) {
+  function recordWaveSkip(track, weight) {
     if (!track) return;
     const key = (typeof getTrackNormalizedKey === 'function') ? getTrackNormalizedKey(track.artist, track.title) : '';
     const artist = (track.artist || '').trim();
     if (!key && !artist) return;
     const skips = getWaveSkips();
-    skips.push({ key, artist, t: Date.now() });
+    skips.push({ key, artist, t: Date.now(), w: weight || 1 });
     if (skips.length > 200) {
       skips.splice(0, skips.length - 200);
     }
@@ -29340,7 +29427,7 @@ function bindCoverHoldZoom(wrapEl) {
         const a = s.artist.trim();
         const normA = normalizeArtistName(a);
         if (normA) {
-          artistCounts[normA] = (artistCounts[normA] || 0) + 1;
+          artistCounts[normA] = (artistCounts[normA] || 0) + (Number(s.w) > 1 ? Number(s.w) : 1);
           if (!artistDisplay[normA]) {
             artistDisplay[normA] = a;
           }
@@ -31065,23 +31152,115 @@ function bindCoverHoldZoom(wrapEl) {
     return card;
   }
 
-  function detectUserMusicRegion() {
-    const sample = [...(state.favorites || []), ...(state.history || [])];
-    let cyrCount = 0;
-    let uaCount = 0;
+  /* ---------- Which country's music the listener is into: system region, time zone and the language of what they play ---------- */
+  const CYR_COUNTRIES = ['RU', 'UA', 'BY', 'KZ', 'KG', 'UZ', 'TJ', 'MD', 'AM', 'AZ', 'GE'];
+  const ARAB_COUNTRIES = ['EG', 'SA', 'AE', 'MA', 'DZ', 'IQ', 'JO', 'LB', 'KW', 'QA', 'TN', 'LY', 'OM', 'BH'];
+  const TZ_COUNTRY = {
+    'Europe/Moscow': 'RU', 'Europe/Kaliningrad': 'RU', 'Europe/Samara': 'RU', 'Europe/Volgograd': 'RU', 'Asia/Yekaterinburg': 'RU', 'Asia/Omsk': 'RU',
+    'Asia/Novosibirsk': 'RU', 'Asia/Krasnoyarsk': 'RU', 'Asia/Irkutsk': 'RU', 'Asia/Yakutsk': 'RU', 'Asia/Vladivostok': 'RU', 'Asia/Magadan': 'RU', 'Asia/Kamchatka': 'RU',
+    'Europe/Kiev': 'UA', 'Europe/Kyiv': 'UA', 'Europe/Minsk': 'BY', 'Asia/Almaty': 'KZ', 'Asia/Aqtobe': 'KZ', 'Asia/Qyzylorda': 'KZ', 'Asia/Tashkent': 'UZ',
+    'Asia/Bishkek': 'KG', 'Asia/Tbilisi': 'GE', 'Asia/Yerevan': 'AM', 'Asia/Baku': 'AZ', 'Europe/Chisinau': 'MD',
+    'Europe/London': 'GB', 'Europe/Dublin': 'IE', 'Europe/Paris': 'FR', 'Europe/Berlin': 'DE', 'Europe/Madrid': 'ES', 'Europe/Rome': 'IT', 'Europe/Warsaw': 'PL',
+    'Europe/Prague': 'CZ', 'Europe/Vienna': 'AT', 'Europe/Zurich': 'CH', 'Europe/Amsterdam': 'NL', 'Europe/Brussels': 'BE', 'Europe/Stockholm': 'SE', 'Europe/Oslo': 'NO',
+    'Europe/Copenhagen': 'DK', 'Europe/Helsinki': 'FI', 'Europe/Lisbon': 'PT', 'Europe/Athens': 'GR', 'Europe/Istanbul': 'TR', 'Europe/Bucharest': 'RO', 'Europe/Budapest': 'HU',
+    'Europe/Sofia': 'BG', 'Europe/Belgrade': 'RS', 'Europe/Zagreb': 'HR', 'Europe/Riga': 'LV', 'Europe/Vilnius': 'LT', 'Europe/Tallinn': 'EE', 'Europe/Luxembourg': 'LU',
+    'America/Toronto': 'CA', 'America/Vancouver': 'CA', 'America/Edmonton': 'CA', 'America/Winnipeg': 'CA', 'America/Halifax': 'CA', 'America/Mexico_City': 'MX',
+    'America/Sao_Paulo': 'BR', 'America/Argentina/Buenos_Aires': 'AR', 'America/Buenos_Aires': 'AR', 'America/Santiago': 'CL', 'America/Bogota': 'CO', 'America/Lima': 'PE',
+    'America/Guayaquil': 'EC', 'America/Caracas': 'VE', 'America/Montevideo': 'UY', 'America/Costa_Rica': 'CR', 'America/Panama': 'PA',
+    'Asia/Tokyo': 'JP', 'Asia/Seoul': 'KR', 'Asia/Kolkata': 'IN', 'Asia/Calcutta': 'IN', 'Asia/Bangkok': 'TH', 'Asia/Jakarta': 'ID', 'Asia/Manila': 'PH', 'Asia/Ho_Chi_Minh': 'VN',
+    'Asia/Saigon': 'VN', 'Asia/Taipei': 'TW', 'Asia/Hong_Kong': 'HK', 'Asia/Singapore': 'SG', 'Asia/Kuala_Lumpur': 'MY', 'Asia/Dubai': 'AE', 'Asia/Riyadh': 'SA',
+    'Asia/Jerusalem': 'IL', 'Asia/Tel_Aviv': 'IL', 'Asia/Karachi': 'PK', 'Asia/Dhaka': 'BD', 'Africa/Cairo': 'EG', 'Africa/Johannesburg': 'ZA', 'Africa/Lagos': 'NG',
+    'Africa/Casablanca': 'MA', 'Africa/Nairobi': 'KE', 'Africa/Algiers': 'DZ', 'Africa/Tunis': 'TN', 'Pacific/Auckland': 'NZ'
+  };
+
+  function systemMusicCountry() {
+    const langs = (navigator.languages && navigator.languages.length) ? navigator.languages : [navigator.language];
+    const regionOf = (l) => { const m = /[-_]([A-Za-z]{2})(?:$|[-_])/.exec(String(l || '')); return m ? m[1].toUpperCase() : ''; };
+    // The main language of the system says the most; when it has no region the time zone decides, and only then the other languages.
+    if (regionOf(langs[0])) return regionOf(langs[0]);
+    let tz = '';
+    try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (_) {}
+    if (TZ_COUNTRY[tz]) return TZ_COUNTRY[tz];
+    if (/^Australia\//.test(tz)) return 'AU';
+    if (/^America\//.test(tz) && !/^America\/(Argentina|Mexico|Sao_Paulo|Bogota|Lima|Santiago|Caracas)/.test(tz)) return 'US';
+    for (const l of langs) if (regionOf(l)) return regionOf(l);
+    return '';
+  }
+
+  /* The language of what the listener plays, from the letters used in their liked and recent tracks. */
+  function listeningScript() {
+    const sample = [...(state.favorites || []), ...(state.history || []).slice(0, 60)].filter(t => t && t.platform !== 'local' && !t.isPodcast);
+    if (sample.length < 4) return null;
+    const c = { cyr: 0, hangul: 0, kana: 0, han: 0, thai: 0, hebrew: 0, deva: 0, greek: 0, arabic: 0, ua: 0, kz: 0, by: 0 };
     for (const t of sample) {
-      if (!t) continue;
       const str = `${t.title || ''} ${t.artist || ''}`;
-      if (/[а-яёіїєґ]/i.test(str)) cyrCount++;
-      if (/[іїєґ]/i.test(str)) uaCount++;
+      if (/[Ѐ-ӿ]/.test(str)) c.cyr++;
+      if (/[іїєґІЇЄҐ]/.test(str)) c.ua++;
+      if (/[әғқңөұүһӘҒҚҢӨҰҮҺ]/.test(str)) c.kz++;
+      if (/[ўЎ]/.test(str)) c.by++;
+      if (/[가-힯]/.test(str)) c.hangul++;
+      if (/[぀-ヿ]/.test(str)) c.kana++;
+      if (/[一-鿿]/.test(str)) c.han++;
+      if (/[฀-๿]/.test(str)) c.thai++;
+      if (/[֐-׿]/.test(str)) c.hebrew++;
+      if (/[ऀ-ॿ]/.test(str)) c.deva++;
+      if (/[Ͱ-Ͽ]/.test(str)) c.greek++;
+      if (/[؀-ۿ]/.test(str)) c.arabic++;
     }
-    const uiLang = (localStorage.getItem('jeem_ui_lang') || '').toLowerCase();
-    if (uiLang === 'uk' || (sample.length > 0 && uaCount / sample.length >= 0.15)) return 'ua';
-    if (uiLang === 'ru' || (sample.length > 0 && cyrCount / sample.length >= 0.18) || (navigator.languages || []).some(l => /^ru/i.test(l))) return 'ru';
-    if (uiLang === 'kz') return 'kz';
-    const hasCyrPlaylist = (state.playlists || []).some(p => p && p.name && /[а-яёіїєґ]/i.test(p.name));
-    if (hasCyrPlaylist) return 'ru';
-    return 'us';
+    const n = sample.length;
+    const share = k => c[k] / n;
+    let script = null, best = 0.2;
+    for (const k of ['cyr', 'hangul', 'kana', 'thai', 'hebrew', 'deva', 'greek', 'arabic', 'han']) {
+      if (share(k) >= best) { script = k; best = share(k); }
+    }
+    if (script === 'han' && share('kana') >= 0.1) script = 'kana';
+    return script ? { script, ua: share('ua'), kz: share('kz'), by: share('by') } : null;
+  }
+
+  /* Countries that have an official YouTube Music chart. */
+  const CHART_COUNTRIES = ['AR', 'AU', 'AT', 'BE', 'BO', 'BR', 'CA', 'CL', 'CO', 'CR', 'CZ', 'DK', 'DO', 'EC', 'EG', 'SV', 'EE', 'FI', 'FR', 'DE', 'GT', 'HN', 'HK', 'HU', 'IS', 'IN', 'ID', 'IE', 'IL', 'IT', 'JP', 'KE', 'LU', 'MY', 'MX', 'NL', 'NZ', 'NI', 'NG', 'NO', 'PA', 'PY', 'PE', 'PH', 'PL', 'PT', 'RO', 'RU', 'SA', 'RS', 'SG', 'ZA', 'KR', 'ES', 'SE', 'CH', 'TW', 'TZ', 'TH', 'TR', 'UG', 'UA', 'AE', 'GB', 'US', 'UY', 'VN', 'ZW'];
+
+  function detectUserMusicCountry(ignoreOverride = false) {
+    try {
+      const forced = (localStorage.getItem('jeem_region_override') || '').trim().toUpperCase();
+      if (!ignoreOverride && /^[A-Z]{2}$/.test(forced)) return forced;
+    } catch (_) {}
+    const sys = systemMusicCountry();
+    const ls = listeningScript();
+    if (ls) {
+      const same = (list) => (list.includes(sys) ? sys : '');
+      switch (ls.script) {
+        case 'cyr':
+          if (ls.ua >= 0.15) return 'UA';
+          if (ls.kz >= 0.1) return 'KZ';
+          if (ls.by >= 0.05) return 'BY';
+          return same(CYR_COUNTRIES) || 'RU';
+        case 'hangul': return 'KR';
+        case 'kana': return 'JP';
+        case 'thai': return 'TH';
+        case 'hebrew': return 'IL';
+        case 'deva': return 'IN';
+        case 'greek': return 'GR';
+        case 'arabic': return same(ARAB_COUNTRIES) || 'EG';
+        case 'han': return ['TW', 'HK'].includes(sys) ? sys : 'TW';
+      }
+    }
+    const ui = (localStorage.getItem('jeem_ui_lang') || '').toLowerCase();
+    if (ui === 'uk') return 'UA';
+    if (ui === 'kz') return 'KZ';
+    if (ui === 'ru') return CYR_COUNTRIES.includes(sys) ? sys : 'RU';
+    return sys || 'US';
+  }
+
+  /* The country whose official chart to show: YouTube has charts for 71 countries, the rest of the Russian-speaking world follows Russia's. */
+  function detectUserMusicRegion(ignoreOverride = false) {
+    const c = detectUserMusicCountry(ignoreOverride);
+    if (['BY', 'KZ', 'UZ', 'KG', 'TJ', 'MD', 'AM', 'AZ', 'GE'].includes(c)) {
+      const ls = listeningScript();
+      const ruUi = (localStorage.getItem('jeem_ui_lang') || '').toLowerCase() === 'ru' || (navigator.languages || []).some(l => /^ru/i.test(l));
+      if ((ls && ls.script === 'cyr') || ruUi) return 'RU';
+    }
+    return c;
   }
 
   async function renderTrending() {
@@ -31155,6 +31334,89 @@ function bindCoverHoldZoom(wrapEl) {
       if (!cachedTrend || cachedTrend.length === 0) {
         sec.hidden = true;
       }
+    }
+  }
+
+  /* ---------- New releases: fresh albums and singles from the artists whose tracks the listener liked ---------- */
+  const NEW_RELEASES_KEY = 'jeem_new_releases';
+  const NEW_RELEASES_DAYS = 180;
+
+  function newReleaseArtists() {
+    const counts = new Map();
+    (state.favorites || []).forEach((t, i) => {
+      if (!t || t.platform === 'local' || t.isPodcast) return;
+      String(t.artist || '').split(/[,;&]/).forEach(raw => {
+        const a = raw.replace(/ - Topic$/i, '').trim();
+        if (!a || /^unknown artist$/i.test(a)) return;
+        const rec = counts.get(a.toLowerCase()) || { name: a, n: 0, first: i };
+        rec.n += 1;
+        counts.set(a.toLowerCase(), rec);
+      });
+    });
+    return [...counts.values()]
+      .filter(r => !isArtistBlocked(r.name))
+      .sort((a, b) => (b.n - a.n) || (a.first - b.first))
+      .slice(0, 14)
+      .map(r => r.name);
+  }
+
+  function freshReleases(list) {
+    const limit = Date.now() - NEW_RELEASES_DAYS * 86400000;
+    const seen = new Set();
+    return (list || []).filter(r => {
+      const ts = Date.parse(r.releaseDate || '');
+      if (!r || !r.cover || !ts || ts < limit || ts > Date.now() + 14 * 86400000) return false;
+      const k = getTrackNormalizedKey(r.artist, r.title);
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    }).sort((a, b) => Date.parse(b.releaseDate) - Date.parse(a.releaseDate)).slice(0, 20);
+  }
+
+  function renderNewReleaseCards(row, releases) {
+    row.innerHTML = '';
+    const ru = localStorage.getItem('jeem_ui_lang') === 'ru';
+    releases.forEach(rel => {
+      const type = /^(single|ep)$/i.test(rel.recordType || '') ? (rel.recordType.toLowerCase() === 'ep' ? 'EP' : t('Single')) : t('Album');
+      const d = new Date(rel.releaseDate);
+      const when = d.toLocaleDateString(ru ? 'ru-RU' : 'en-US', { day: 'numeric', month: 'short' });
+      row.appendChild(spCard({
+        cover: rel.cover,
+        title: rel.title,
+        sub: `${rel.artist} · ${type} · ${when}`,
+        onClick: () => openAlbum(rel)
+      }));
+    });
+    bindHorizontalWheel(row);
+    requestAnimationFrame(() => updateRowFade(row));
+    refreshOverflowFades(row);
+  }
+
+  async function renderNewReleases() {
+    const sec = document.getElementById('sp-releases-sec');
+    const row = document.getElementById('sp-releases');
+    if (!sec || !row) return;
+    const artists = newReleaseArtists();
+    if (!artists.length) { sec.hidden = true; return; }
+    const sig = artists.join('|').toLowerCase();
+    const cache = safeJson(NEW_RELEASES_KEY, null);
+    const cached = cache && cache.sig === sig && Array.isArray(cache.releases) ? freshReleases(cache.releases) : null;
+    if (cached && cached.length) { renderNewReleaseCards(row, cached); sec.hidden = false; }
+    if (cache && cache.sig === sig && Date.now() - (cache.ts || 0) < 6 * 3600 * 1000) {
+      if (!cached || !cached.length) sec.hidden = true;
+      return;
+    }
+    try {
+      const port = state.serverPort || 38472;
+      const res = await fetch(`http://127.0.0.1:${port}/api/new-releases?artists=${encodeURIComponent(artists.join(','))}`);
+      const data = await res.json();
+      if (!data || !data.success) { if (!cached || !cached.length) sec.hidden = true; return; }
+      try { localStorage.setItem(NEW_RELEASES_KEY, JSON.stringify({ ts: Date.now(), sig, releases: data.releases || [] })); } catch (_) {}
+      const fresh = freshReleases(data.releases);
+      if (fresh.length) { renderNewReleaseCards(row, fresh); sec.hidden = false; }
+      else sec.hidden = true;
+    } catch (_) {
+      if (!cached || !cached.length) sec.hidden = true;
     }
   }
 
@@ -31733,6 +31995,7 @@ function bindCoverHoldZoom(wrapEl) {
   function renderSpotifyHome() {
     renderQuickAccess();
     renderTrending();
+    renderNewReleases();
     renderMadeForYou();
     renderFavArtistsHome();
     refreshOverflowFades();
@@ -32954,12 +33217,13 @@ function bindCoverHoldZoom(wrapEl) {
     }
   }
 
-  const DEFAULT_HOME_ORDER = ['sp-quick-sec', 'sp-trend-sec', 'sp-artists-sec'];
+  const DEFAULT_HOME_ORDER = ['sp-quick-sec', 'sp-trend-sec', 'sp-releases-sec', 'sp-artists-sec'];
 
   const HOME_SECTION_DEFS = {
     'sp-made-sec': { name: 'For you', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 10v2M8 6v10M12 2v18M16 6v10M20 10v2"/></svg>' },
     'sp-quick-sec': { name: 'Home / Quick picks', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>' },
     'sp-trend-sec': { name: 'Trending now', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2c1 4 5 5.5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 2 3 0-3-1-6 1-9z"/></svg>' },
+    'sp-releases-sec': { name: 'New releases', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>' },
     'sp-artists-sec': { name: 'Favorite artists', icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>' }
   };
 
@@ -32970,8 +33234,11 @@ function bindCoverHoldZoom(wrapEl) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
           const valid = parsed.filter(id => DEFAULT_HOME_ORDER.includes(id));
-          DEFAULT_HOME_ORDER.forEach(id => {
-            if (!valid.includes(id)) valid.push(id);
+          DEFAULT_HOME_ORDER.forEach((id, di) => {
+            if (valid.includes(id)) return;
+            // a section added later goes right after the default section that precedes it
+            const prev = di > 0 ? valid.indexOf(DEFAULT_HOME_ORDER[di - 1]) : -1;
+            if (prev >= 0) valid.splice(prev + 1, 0, id); else valid.push(id);
           });
           return valid;
         }
@@ -34176,7 +34443,11 @@ function bindCoverHoldZoom(wrapEl) {
 
     const btnSidebarToggle = document.getElementById('btn-sidebar-toggle');
     if (btnSidebarToggle) {
-      btnSidebarToggle.addEventListener('click', () => switchView('discover'));
+      // first click returns to the discover page as it was (search results stay), a second click goes to the start page
+      btnSidebarToggle.addEventListener('click', () => {
+        if (state.currentView === 'discover') goHome();
+        else switchView('discover');
+      });
     }
 
     const btnTogglePlaylists = document.getElementById('btn-toggle-playlists-drawer');

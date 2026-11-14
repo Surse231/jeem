@@ -20,6 +20,28 @@ fn has_cyrillic(t: &str) -> bool {
     t.chars().any(|c| ('\u{0400}'..='\u{04FF}').contains(&c))
 }
 
+/// The writing system of a text: 0 = Latin or unknown, otherwise one code per script (used to keep the stream in the listener's language).
+fn script_of(t: &str) -> u8 {
+    for c in t.chars() {
+        let n = c as u32;
+        let code = match n {
+            0x0400..=0x04FF => 1,
+            0xAC00..=0xD7AF | 0x1100..=0x11FF => 2,
+            0x3040..=0x30FF | 0x4E00..=0x9FFF => 3,
+            0x0E00..=0x0E7F => 4,
+            0x0590..=0x05FF => 5,
+            0x0600..=0x06FF => 6,
+            0x0900..=0x097F => 7,
+            0x0370..=0x03FF => 8,
+            _ => 0,
+        };
+        if code != 0 {
+            return code;
+        }
+    }
+    0
+}
+
 struct Rng(u64);
 impl Rng {
     fn new() -> Self {
@@ -149,6 +171,27 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
             add_artist(s(t.get("artist")), &mut artists);
         }
     }
+    let region = s(body.get("region")).to_string();
+    let mut chart: Vec<Value> = Vec::new();
+    if artists.len() < 4 {
+        chart = ytm::yt_chart(ctx, &region).await.1;
+        for t in chart.iter().take(14) {
+            add_artist(s(t.get("artist")), &mut artists);
+        }
+    }
+    // The language of the listener's own artists: a stream for someone who listens to Russian, Korean, ... music stays mostly in it.
+    let cold = !chart.is_empty();
+    let own_texts: Vec<String> = if cold {
+        chart.iter().take(15).map(|t| format!("{} {}", s(t.get("title")), s(t.get("artist")))).collect()
+    } else {
+        artists.iter().take(12).cloned().collect()
+    };
+    let own = own_texts.len();
+    let mut counts = [0usize; 9];
+    for a in &own_texts {
+        counts[script_of(a) as usize] += 1;
+    }
+    let dominant: u8 = (1..9u8).filter(|k| own >= 3 && counts[*k as usize] * 10 >= own * 7).next().unwrap_or(0);
     if language == "russian" {
         let ru: Vec<String> = artists.iter().filter(|a| has_cyrillic(a)).cloned().collect();
         if !ru.is_empty() {
@@ -188,6 +231,10 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
     taste.extend(radios.0);
     taste.extend(radios.1);
     taste.extend(radios.2);
+    if cold {
+        // A new listener: the country's own chart is part of the stream.
+        taste.extend(chart.iter().take(30).cloned());
+    }
     if popular {
         taste.extend(ytm::deezer_chart(ctx, 40).await);
         taste.sort_by_key(|t| std::cmp::Reverse(t.get("rank").and_then(Value::as_u64).unwrap_or(0)));
@@ -202,7 +249,10 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
     };
     rng.shuffle(&mut themed);
     if taste.is_empty() && themed.is_empty() {
-        taste = ytm::deezer_chart(ctx, 60).await;
+        taste = if chart.is_empty() { ytm::yt_chart(ctx, &region).await.1 } else { chart.clone() };
+        if taste.is_empty() {
+            taste = ytm::deezer_chart(ctx, 60).await;
+        }
         rng.shuffle(&mut taste);
     }
 
@@ -241,6 +291,10 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
         }
         let cyr = has_cyrillic(&title) || has_cyrillic(&artist);
         if (language == "russian" && !cyr) || (language == "foreign" && cyr) {
+            continue;
+        }
+        // Without an explicit language, keep to the listener's own one, letting every fourth track be something else.
+        if language.is_empty() && dominant != 0 && script_of(&format!("{title} {artist}")) != dominant && out.len() % 4 != 3 {
             continue;
         }
         if !seen.insert(format!("{a}:{}", norm(&title))) {

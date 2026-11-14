@@ -118,9 +118,12 @@ async fn api(ctx: &Arc<Ctx>, parts: &Parts, q: &HashMap<String, String>, body: B
             ok(ytm::search(ctx, &get("q"), &platform, num("limit", 12).max(1), num("offset", 0)).await)
         }
         "/api/trending" => {
-            let mut tracks = ytm::deezer_chart(ctx, 40).await;
+            let (chart, mut tracks) = ytm::yt_chart(ctx, &get("region")).await;
+            if tracks.is_empty() {
+                tracks = ytm::deezer_chart(ctx, 40).await;
+            }
             tracks.truncate(35);
-            ok(json!({ "success": true, "tracks": tracks }))
+            ok(json!({ "success": true, "tracks": tracks, "chart": chart }))
         }
         "/api/hot" => {
             let limit = num("limit", 12).clamp(1, 25);
@@ -139,6 +142,10 @@ async fn api(ctx: &Arc<Ctx>, parts: &Parts, q: &HashMap<String, String>, body: B
         "/api/artist-tracks" => {
             let id = get("id").parse::<u64>().unwrap_or(0);
             ok(json!({ "success": true, "tracks": ytm::artist_all_tracks(ctx, id, &get("name")).await }))
+        }
+        "/api/new-releases" => {
+            let names: Vec<String> = get("artists").split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
+            ok(json!({ "success": true, "releases": ytm::new_releases(ctx, &names).await }))
         }
         "/api/vibe" => {
             let b: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
