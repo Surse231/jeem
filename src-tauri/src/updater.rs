@@ -5,7 +5,7 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 
 const FIRST_DELAY_MS: u64 = 1500;
 const CHECK_EVERY_SECS: u64 = 6 * 60 * 60;
-const RELEASES_URL: &str = "https://github.com/Surse231/jeem-releases/releases/latest";
+const RELEASES_URL: &str = "https://github.com/Surse231/jeem/releases/latest";
 
 #[derive(Default)]
 struct State {

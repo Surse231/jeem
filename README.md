@@ -16,7 +16,7 @@ A free music player for Windows. Search and play music from YouTube Music, YouTu
 
 ## Download
 
-Get the latest installer from the [releases page](https://github.com/Surse231/jeem-releases/releases/latest).
+Get the latest installer from the [releases page](https://github.com/Surse231/jeem/releases/latest).
 
 ## Build from source
 

@@ -22670,7 +22670,7 @@ function bindCoverHoldZoom(wrapEl) {
     const originalBtnHtml = btn ? btn.innerHTML : 'Check for updates';
     let manualUpdateCheck = false;
     let checkTimeoutId = null;
-    let fallbackReleaseUrl = 'https://github.com/Surse231/jeem-releases/releases/latest';
+    let fallbackReleaseUrl = 'https://github.com/Surse231/jeem/releases/latest';
     let canNativeInstall = false;
 
     let latestUpdateInfo = null;
@@ -22793,13 +22793,13 @@ function bindCoverHoldZoom(wrapEl) {
           showToast('Could not check for updates', 'error');
           return;
         }
-        const res = await fetch('https://api.github.com/repos/Surse231/jeem-releases/releases/latest', {
+        const res = await fetch('https://api.github.com/repos/Surse231/jeem/releases/latest', {
           headers: { 'User-Agent': 'Jeem-Player' }
         });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const json = await res.json();
         const latestVersion = (json.tag_name || '').replace(/^v/i, '');
-        fallbackReleaseUrl = json.html_url || 'https://github.com/Surse231/jeem-releases/releases/latest';
+        fallbackReleaseUrl = json.html_url || 'https://github.com/Surse231/jeem/releases/latest';
         if (isNewerVersion(latestVersion, currentAppVersion)) {
           latestUpdateInfo = {
             version: latestVersion,
@@ -22863,7 +22863,7 @@ function bindCoverHoldZoom(wrapEl) {
 
         if (!hasImg || !hasPublishedAt) {
           try {
-            const res = await fetch('https://api.github.com/repos/Surse231/jeem-releases/releases/latest', {
+            const res = await fetch('https://api.github.com/repos/Surse231/jeem/releases/latest', {
               headers: { 'User-Agent': 'Jeem-Player' }
             });
             if (res.ok) {

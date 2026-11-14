@@ -1,4 +1,4 @@
-# Builds the signed installer and publishes it to the public Surse231/jeem-releases repo.
+# Builds the signed installer and publishes it to the public Surse231/jeem repo.
 # Usage: powershell -File scripts\release.ps1 -Notes "What changed"
 param([string]$Notes = "")
 
@@ -30,7 +30,7 @@ if ($LASTEXITCODE -ne 0) { throw "Build failed" }
 $dir = "src-tauri\target\release\bundle\nsis"
 $exe = Get-ChildItem $dir -Filter "*_${version}_x64-setup.exe" | Select-Object -First 1
 $sig = Get-Content "$($exe.FullName).sig" -Raw
-$url = "https://github.com/Surse231/jeem-releases/releases/download/$tag/$($exe.Name)"
+$url = "https://github.com/Surse231/jeem/releases/download/$tag/$($exe.Name)"
 
 $latest = [ordered]@{
   version  = $version
@@ -44,4 +44,4 @@ $latestPath = Join-Path $dir "latest.json"
 $json = $latest | ConvertTo-Json -Depth 5
 [System.IO.File]::WriteAllText((Join-Path $root $latestPath), $json, (New-Object System.Text.UTF8Encoding($false)))
 
-gh release create $tag $exe.FullName $latestPath --repo Surse231/jeem-releases --title "Jeem $tag" --notes $Notes
+gh release create $tag $exe.FullName $latestPath --repo Surse231/jeem --title "Jeem $tag" --notes $Notes
