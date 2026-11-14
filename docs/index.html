@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jeem — музыкальный плеер для Windows</title>
+<meta name="description" content="Бесплатный музыкальный плеер для Windows: YouTube Music, YouTube и SoundCloud в одном приложении. Без рекламы и подписок.">
+<meta property="og:title" content="Jeem — музыкальный плеер для Windows">
+<meta property="og:description" content="YouTube Music, YouTube и SoundCloud в одном приложении. Бесплатно, без рекламы, с открытым кодом.">
+<meta property="og:image" content="media/search.jpg">
+<link rel="icon" href="media/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #07070b;
+  --panel: #111118;
+  --line: rgba(255, 255, 255, 0.08);
+  --text: #f4f4f8;
+  --muted: rgba(244, 244, 248, 0.62);
+  --pink: #ff6fae;
+  --violet: #9b7bff;
+  --cyan: #3dd6ff;
+  --amber: #ffb347;
+  --radius: 22px;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 500 17px/1.6 Manrope, "Segoe UI", system-ui, sans-serif;
+  overflow-x: hidden;
+}
+a { color: inherit; }
+.glow {
+  position: fixed; inset: -20vh -20vw; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(40vw 40vw at 15% 10%, rgba(155, 123, 255, 0.22), transparent 70%),
+    radial-gradient(40vw 40vw at 90% 30%, rgba(255, 111, 174, 0.16), transparent 70%),
+    radial-gradient(45vw 45vw at 40% 95%, rgba(61, 214, 255, 0.12), transparent 70%);
+}
+.wrap { width: min(1120px, 100% - 32px); margin: 0 auto; }
+
+/* header */
+header { position: sticky; top: 0; z-index: 10; backdrop-filter: blur(14px); background: rgba(7, 7, 11, 0.6); border-bottom: 1px solid var(--line); }
+.bar { display: flex; align-items: center; gap: 24px; height: 64px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 20px; text-decoration: none; }
+.brand img { width: 32px; height: 32px; }
+nav { display: flex; gap: 22px; margin-left: auto; }
+nav a { text-decoration: none; color: var(--muted); font-weight: 600; font-size: 15px; transition: color .2s; }
+nav a:hover { color: var(--text); }
+.lang { display: flex; border: 1px solid var(--line); border-radius: 999px; padding: 3px; }
+.lang button { border: 0; background: none; color: var(--muted); font: 700 13px Manrope, sans-serif; padding: 5px 10px; border-radius: 999px; cursor: pointer; }
+.lang button.on { background: rgba(255, 255, 255, 0.12); color: var(--text); }
+
+/* hero */
+.hero { padding: 96px 0 56px; text-align: center; }
+.hero .logo { width: 104px; height: 104px; filter: drop-shadow(0 18px 50px rgba(155, 123, 255, 0.45)); }
+h1 { font-size: clamp(40px, 7vw, 76px); line-height: 1.05; margin: 22px 0 18px; letter-spacing: -0.03em; font-weight: 800; }
+.grad { background: linear-gradient(90deg, var(--pink), var(--violet) 55%, var(--cyan)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.lead { color: var(--muted); font-size: clamp(17px, 2.2vw, 21px); max-width: 640px; margin: 0 auto 34px; }
+.cta { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
+.btn {
+  display: inline-flex; align-items: center; gap: 10px; padding: 15px 26px; border-radius: 999px;
+  font-weight: 700; font-size: 17px; text-decoration: none; transition: transform .2s, box-shadow .2s, background .2s;
+}
+.btn svg { width: 20px; height: 20px; }
+.btn-main { background: linear-gradient(90deg, var(--pink), var(--violet)); color: #fff; box-shadow: 0 10px 40px rgba(255, 111, 174, 0.35); }
+.btn-main:hover { transform: translateY(-2px); box-shadow: 0 14px 50px rgba(255, 111, 174, 0.5); }
+.btn-ghost { border: 1px solid var(--line); background: rgba(255, 255, 255, 0.04); }
+.btn-ghost:hover { background: rgba(255, 255, 255, 0.09); }
+.meta { margin-top: 16px; color: var(--muted); font-size: 14px; }
+
+/* app window with a live clip */
+.window {
+  position: relative; border-radius: var(--radius); overflow: hidden; background: var(--panel);
+  border: 1px solid var(--line); box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+}
+.window::before {
+  content: ""; position: absolute; inset: -2px; z-index: -1; border-radius: inherit; filter: blur(30px); opacity: .55;
+  background: conic-gradient(from 0deg, var(--pink), var(--violet), var(--cyan), var(--amber), var(--pink));
+}
+.window video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 10; object-fit: cover; }
+.window.wide video { aspect-ratio: 1440 / 768; }
+.showcase { margin: 40px auto 0; width: min(980px, 100%); position: relative; isolation: isolate; }
+
+/* features */
+section { padding: 72px 0; }
+.kicker { color: var(--pink); font-weight: 800; letter-spacing: .12em; text-transform: uppercase; font-size: 13px; }
+h2 { font-size: clamp(30px, 4.4vw, 46px); line-height: 1.12; margin: 10px 0 16px; letter-spacing: -0.02em; }
+.feature { display: grid; grid-template-columns: 1fr 1.35fr; gap: 56px; align-items: center; padding: 48px 0; }
+.feature:nth-child(even) { grid-template-columns: 1.35fr 1fr; }
+.feature:nth-child(even) .text { order: 2; }
+.feature .text p { color: var(--muted); margin: 0; }
+.feature .media { position: relative; isolation: isolate; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.chips span { border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; font-size: 14px; color: var(--muted); }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 28px; }
+.card { background: rgba(255, 255, 255, 0.035); border: 1px solid var(--line); border-radius: 18px; padding: 22px; }
+.card b { display: block; margin-bottom: 6px; font-size: 17px; }
+.card span { color: var(--muted); font-size: 15px; }
+
+/* release notes */
+.release { background: rgba(255, 255, 255, 0.035); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px 30px; }
+.release h3 { margin: 0 0 4px; font-size: 24px; }
+.release .date { color: var(--muted); font-size: 14px; }
+.release .notes { margin-top: 16px; color: var(--muted); white-space: pre-line; }
+.release .notes:empty { display: none; }
+
+/* faq */
+details { border-bottom: 1px solid var(--line); padding: 18px 4px; }
+summary { cursor: pointer; font-weight: 700; font-size: 18px; list-style: none; display: flex; justify-content: space-between; gap: 16px; }
+summary::-webkit-details-marker { display: none; }
+summary::after { content: "+"; color: var(--pink); font-size: 24px; line-height: 1; transition: transform .2s; }
+details[open] summary::after { transform: rotate(45deg); }
+details p { color: var(--muted); margin: 12px 0 0; }
+code { background: rgba(255, 255, 255, 0.08); padding: 2px 6px; border-radius: 6px; font-size: .9em; word-break: break-all; }
+
+footer { border-top: 1px solid var(--line); padding: 34px 0 48px; color: var(--muted); font-size: 14px; }
+footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+
+.reveal { opacity: 0; transform: translateY(26px); transition: opacity .7s ease, transform .7s ease; }
+.reveal.in { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } html { scroll-behavior: auto; } }
+
+@media (max-width: 860px) {
+  nav { display: none; }
+  .lang { margin-left: auto; }
+  .hero { padding-top: 64px; }
+  .feature, .feature:nth-child(even) { grid-template-columns: 1fr; gap: 26px; padding: 32px 0; }
+  .feature:nth-child(even) .text { order: 0; }
+  .grid { grid-template-columns: 1fr; }
+  section { padding: 48px 0; }
+}
+</style>
+</head>
+<body>
+<div class="glow"></div>
+
+<header>
+  <div class="wrap bar">
+    <a class="brand" href="#"><img src="media/logo.svg" alt="">Jeem</a>
+    <nav>
+      <a href="#features" data-i18n="navFeatures">Возможности</a>
+      <a href="#release" data-i18n="navRelease">Что нового</a>
+      <a href="#faq" data-i18n="navFaq">Вопросы</a>
+      <a href="https://github.com/Surse231/jeem">GitHub</a>
+    </nav>
+    <div class="lang" role="group" aria-label="Language">
+      <button type="button" data-lang="ru">RU</button>
+      <button type="button" data-lang="en">EN</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="hero wrap">
+    <img class="logo" src="media/logo.svg" alt="Jeem">
+    <h1><span data-i18n="heroA">Вся музыка —</span><br><span class="grad" data-i18n="heroB">в одном месте</span></h1>
+    <p class="lead" data-i18n="lead">YouTube Music, YouTube и SoundCloud в одном приложении для Windows. Бесплатно, без рекламы и подписок.</p>
+    <div class="cta">
+      <a class="btn btn-main dl-link" href="https://github.com/Surse231/jeem/releases/latest">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>
+        <span data-i18n="download">Скачать для Windows</span>
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/Surse231/jeem">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.56-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+        <span data-i18n="source">Исходный код</span>
+      </a>
+    </div>
+    <div class="meta"><span class="ver">Windows 10/11 · 64-bit</span></div>
+    <div class="showcase reveal">
+      <div class="window"><video src="media/search.mp4" poster="media/search.jpg" autoplay muted loop playsinline></video></div>
+    </div>
+  </div>
+
+  <section id="features">
+    <div class="wrap">
+      <div class="feature reveal">
+        <div class="text">
+          <div class="kicker" data-i18n="k1">Поиск</div>
+          <h2 data-i18n="h1">Один поиск на три сервиса</h2>
+          <p data-i18n="p1">Ищи треки, альбомы, артистов и плейлисты сразу в YouTube Music, YouTube и SoundCloud. Слушай в приложении — без браузера и вкладок.</p>
+        </div>
+        <div class="media"><div class="window"><video src="media/search.mp4" poster="media/search.jpg" muted loop playsinline preload="none"></video></div></div>
+      </div>
+
+      <div class="feature reveal">
+        <div class="text">
+          <div class="kicker" data-i18n="k2">Моя волна</div>
+          <h2 data-i18n="h2">Бесконечный поток под твой вкус</h2>
+          <p data-i18n="p2">Нажми play — Jeem подберёт музыку по тому, что ты слушаешь и лайкаешь. Настрой её под занятие, настроение и язык.</p>
+          <div class="chips"><span data-i18n="c1">Тренировка</span><span data-i18n="c2">Работаю</span><span data-i18n="c3">Энергичное</span><span data-i18n="c4">Без слов</span></div>
+        </div>
+        <div class="media"><div class="window"><video src="media/wave.mp4" poster="media/wave.jpg" muted loop playsinline preload="none"></video></div></div>
+      </div>
+
+      <div class="feature reveal">
+        <div class="text">
+          <div class="kicker" data-i18n="k3">Тексты</div>
+          <h2 data-i18n="h3">Тексты в такт песне</h2>
+          <p data-i18n="p3">Синхронные тексты на весь экран — строка подсвечивается ровно в момент, когда её поют. Если синхронного текста нет, Jeem покажет обычный.</p>
+        </div>
+        <div class="media"><div class="window wide"><video src="media/lyrics.mp4" poster="media/lyrics.jpg" muted loop playsinline preload="none"></video></div></div>
+      </div>
+
+      <div class="feature reveal">
+        <div class="text">
+          <div class="kicker" data-i18n="k4">Подкасты</div>
+          <h2 data-i18n="h4">Подкасты, которые можно скачать</h2>
+          <p data-i18n="p4">Подписывайся на подкасты, скачивай выпуски и слушай офлайн. Jeem запомнит, где ты остановился.</p>
+        </div>
+        <div class="media"><div class="window"><video src="media/podcasts.mp4" poster="media/podcasts.jpg" muted loop playsinline preload="none"></video></div></div>
+      </div>
+
+      <div class="feature reveal">
+        <div class="text">
+          <div class="kicker" data-i18n="k5">Темы</div>
+          <h2 data-i18n="h5">Твоя тема. Твои цвета.</h2>
+          <p data-i18n="p5">Тёмная и светлая тема, акцентные цвета, насыщенность, шрифты и даже свой CSS.</p>
+        </div>
+        <div class="media"><div class="window"><video src="media/theme.mp4" poster="media/theme.jpg" muted loop playsinline preload="none"></video></div></div>
+      </div>
+
+      <div class="grid reveal">
+        <div class="card"><b data-i18n="g1">Офлайн</b><span data-i18n="g1t">Лайкнутые треки сохраняются и играют без интернета.</span></div>
+        <div class="card"><b data-i18n="g2">Эквалайзер</b><span data-i18n="g2t">10 полос и готовые пресеты.</span></div>
+        <div class="card"><b data-i18n="g3">Синхронизация</b><span data-i18n="g3t">Перенеси аккаунт на другой ПК через свой Google Диск.</span></div>
+        <div class="card"><b data-i18n="g4">Last.fm</b><span data-i18n="g4t">Скробблинг прослушиваний в твой профиль.</span></div>
+        <div class="card"><b data-i18n="g5">Обновления</b><span data-i18n="g5t">Новые версии приходят сами.</span></div>
+        <div class="card"><b data-i18n="g6">Открытый код</b><span data-i18n="g6t">Лицензия MIT, весь код на GitHub.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="release">
+    <div class="wrap reveal">
+      <div class="kicker" data-i18n="kRel">Что нового</div>
+      <h2 data-i18n="hRel">Последняя версия</h2>
+      <div class="release">
+        <h3 class="rel-title">Jeem</h3>
+        <div class="date rel-date"></div>
+        <div class="notes rel-notes"></div>
+        <div class="cta" style="justify-content:flex-start;margin-top:22px">
+          <a class="btn btn-main dl-link" href="https://github.com/Surse231/jeem/releases/latest"><span data-i18n="download">Скачать для Windows</span></a>
+          <a class="btn btn-ghost" href="https://github.com/Surse231/jeem/releases" data-i18n="allReleases">Все версии</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="wrap reveal">
+      <div class="kicker" data-i18n="kFaq">Вопросы</div>
+      <h2 data-i18n="hFaq">Частые вопросы</h2>
+      <details><summary data-i18n="q1">Jeem правда бесплатный?</summary><p data-i18n="a1">Да. Ни рекламы, ни подписок, ни платных функций. Код открыт под лицензией MIT.</p></details>
+      <details><summary data-i18n="q2">Windows пишет «Система Windows защитила ваш компьютер». Что делать?</summary><p data-i18n="a2">Установщик не подписан платным сертификатом, поэтому SmartScreen его не знает. Нажми «Подробнее» → «Выполнить в любом случае». Весь код открыт на GitHub — его можно проверить.</p></details>
+      <details><summary data-i18n="q3">Откуда берётся музыка?</summary><p data-i18n="a3">Jeem ищет и воспроизводит музыку из открытых каталогов YouTube Music, YouTube и SoundCloud. Аккаунт в этих сервисах не нужен.</p></details>
+      <details><summary data-i18n="q4">Где хранятся мои данные?</summary><p data-i18n="a4h">Только у тебя на компьютере, в папке <code>%LOCALAPPDATA%\com.jeem.app</code>. Если включишь синхронизацию, копия попадёт в скрытую папку приложения на твоём Google Диске — больше никуда.</p></details>
+      <details><summary data-i18n="q5">Как обновлять?</summary><p data-i18n="a5">Никак — Jeem сам проверяет обновления и предлагает установить новую версию.</p></details>
+      <details><summary data-i18n="q6">Как удалить Jeem полностью?</summary><p data-i18n="a6h">«Параметры» → «Приложения» → Jeem → «Удалить». Чтобы убрать и данные, удали папку <code>%LOCALAPPDATA%\com.jeem.app</code>.</p></details>
+      <details><summary data-i18n="q7">Есть версия для Mac или Linux?</summary><p data-i18n="a7">Пока только Windows 10 и 11 (64-bit).</p></details>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Jeem · <span data-i18n="license">Открытый код, лицензия MIT</span></span>
+    <a href="https://github.com/Surse231/jeem">github.com/Surse231/jeem</a>
+  </div>
+</footer>
+
+<script>
+const I18N = {
+  en: {
+    navFeatures: 'Features', navRelease: "What's new", navFaq: 'FAQ',
+    heroA: 'All your music —', heroB: 'in one place',
+    lead: 'YouTube Music, YouTube and SoundCloud in one Windows app. Free, no ads, no subscriptions.',
+    download: 'Download for Windows', source: 'Source code',
+    k1: 'Search', h1: 'One search, three services',
+    p1: 'Find tracks, albums, artists and playlists on YouTube Music, YouTube and SoundCloud at once. Play them right in the app — no browser, no tabs.',
+    k2: 'My Vibe', h2: 'An endless stream tuned to you',
+    p2: 'Hit play and Jeem picks music based on what you listen to and like. Tune it to your activity, mood and language.',
+    c1: 'Workout', c2: 'Working', c3: 'Energetic', c4: 'No words',
+    k3: 'Lyrics', h3: 'Lyrics in time with the song',
+    p3: 'Full-screen synced lyrics — each line lights up exactly when it is sung. When there are no synced lyrics, Jeem shows the plain text.',
+    k4: 'Podcasts', h4: 'Podcasts you can download',
+    p4: 'Subscribe to podcasts, download episodes and listen offline. Jeem remembers where you stopped.',
+    k5: 'Themes', h5: 'Your theme. Your colours.',
+    p5: 'Dark and light themes, accent colours, intensity, fonts and even your own CSS.',
+    g1: 'Offline', g1t: 'Liked tracks are saved and play without internet.',
+    g2: 'Equalizer', g2t: '10 bands and ready-made presets.',
+    g3: 'Sync', g3t: 'Move your account to another PC through your own Google Drive.',
+    g4: 'Last.fm', g4t: 'Scrobble what you play to your profile.',
+    g5: 'Updates', g5t: 'New versions arrive on their own.',
+    g6: 'Open source', g6t: 'MIT license, all the code is on GitHub.',
+    kRel: "What's new", hRel: 'Latest version', allReleases: 'All versions',
+    kFaq: 'FAQ', hFaq: 'Frequently asked questions',
+    q1: 'Is Jeem really free?', a1: 'Yes. No ads, no subscriptions, no paid features. The code is open under the MIT license.',
+    q2: 'Windows says "Windows protected your PC". What do I do?',
+    a2: 'The installer is not signed with a paid certificate, so SmartScreen does not recognise it. Click "More info" → "Run anyway". All the code is open on GitHub, so you can check it.',
+    q3: 'Where does the music come from?', a3: 'Jeem searches and plays music from the public catalogues of YouTube Music, YouTube and SoundCloud. You do not need an account on these services.',
+    q4: 'Where is my data stored?',
+    a4h: 'Only on your computer, in <code>%LOCALAPPDATA%\\com.jeem.app</code>. If you turn on sync, a copy goes to a hidden app folder in your own Google Drive — nowhere else.',
+    q5: 'How do I update?', a5: 'You don\'t have to — Jeem checks for updates itself and offers to install the new version.',
+    q6: 'How do I remove Jeem completely?',
+    a6h: 'Settings → Apps → Jeem → Uninstall. To remove your data too, delete the <code>%LOCALAPPDATA%\\com.jeem.app</code> folder.',
+    q7: 'Is there a Mac or Linux version?', a7: 'Not yet — only Windows 10 and 11 (64-bit).',
+    license: 'Open source, MIT license',
+    title: 'Jeem — music player for Windows'
+  }
+};
+const RU = {};
+document.querySelectorAll('[data-i18n]').forEach((el) => {
+  const k = el.dataset.i18n;
+  RU[k] = k.endsWith('h') ? el.innerHTML : el.textContent;
+});
+RU.title = document.title;
+I18N.ru = RU;
+
+let lang = 'ru';
+let release = null;
+
+function pickLang() {
+  try {
+    const saved = localStorage.getItem('jeem_site_lang');
+    if (saved === 'ru' || saved === 'en') return saved;
+  } catch (_) {}
+  return /^(ru|uk|be|kk)/i.test(navigator.language || '') ? 'ru' : 'en';
+}
+
+function setLang(l) {
+  lang = l;
+  const d = I18N[l];
+  document.documentElement.lang = l;
+  document.title = d.title;
+  document.querySelectorAll('[data-i18n]').forEach((el) => {
+    const k = el.dataset.i18n;
+    if (!(k in d)) return;
+    if (k.endsWith('h')) el.innerHTML = d[k]; else el.textContent = d[k];
+  });
+  document.querySelectorAll('.lang button').forEach((b) => b.classList.toggle('on', b.dataset.lang === l));
+  try { localStorage.setItem('jeem_site_lang', l); } catch (_) {}
+  renderRelease();
+}
+
+document.querySelectorAll('.lang button').forEach((b) => b.addEventListener('click', () => setLang(b.dataset.lang)));
+
+function fmtSize(bytes) {
+  return (bytes / 1048576).toFixed(1) + (lang === 'ru' ? ' МБ' : ' MB');
+}
+
+function renderRelease() {
+  if (!release) return;
+  const date = new Date(release.published_at).toLocaleDateString(lang === 'ru' ? 'ru-RU' : 'en-US', { day: 'numeric', month: 'long', year: 'numeric' });
+  document.querySelector('.rel-title').textContent = 'Jeem ' + release.tag_name;
+  document.querySelector('.rel-date').textContent = date;
+  document.querySelector('.rel-notes').textContent = (release.body || '').trim();
+  const exe = (release.assets || []).find((a) => /setup\.exe$/i.test(a.name));
+  const size = exe ? ' · ' + fmtSize(exe.size) : '';
+  document.querySelector('.ver').textContent = release.tag_name + size + ' · Windows 10/11 · 64-bit';
+  if (exe) document.querySelectorAll('.dl-link').forEach((a) => { a.href = exe.browser_download_url; });
+}
+
+fetch('https://api.github.com/repos/Surse231/jeem/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })
+  .then((r) => (r.ok ? r.json() : null))
+  .then((j) => { if (j && j.tag_name) { release = j; renderRelease(); } })
+  .catch(() => {});
+
+// play feature clips only while they are on screen
+const io = new IntersectionObserver((entries) => {
+  entries.forEach((e) => {
+    if (e.target.tagName === 'VIDEO') {
+      if (e.isIntersecting) e.target.play().catch(() => {}); else e.target.pause();
+    } else if (e.isIntersecting) {
+      e.target.classList.add('in');
+    }
+  });
+}, { threshold: 0.25 });
+document.querySelectorAll('.feature video').forEach((v) => io.observe(v));
+document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
+
+setLang(pickLang());
+</script>
+</body>
+</html>
