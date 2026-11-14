@@ -1,0 +1,27 @@
+name: Bug report / Сообщить о баге
+description: Something does not work as expected / Что-то работает не так
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened? / Что произошло?
+      description: Describe the problem and what you expected. / Опиши проблему и что ожидал увидеть.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce / Как повторить
+      placeholder: "1. ...\n2. ...\n3. ..."
+  - type: input
+    id: version
+    attributes:
+      label: Jeem version / Версия Jeem
+      description: Settings → About / Настройки → О приложении
+      placeholder: "0.5.2"
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots or notes / Скриншоты или заметки
+      description: Drag images here. Do not post passwords or personal data. / Картинки можно перетащить сюда. Не публикуй пароли и личные данные.

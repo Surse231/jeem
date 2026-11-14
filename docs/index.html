@@ -110,6 +110,12 @@ h2 { font-size: clamp(30px, 4.4vw, 46px); line-height: 1.12; margin: 10px 0 16px
 .release .notes { margin-top: 16px; color: var(--muted); white-space: pre-line; }
 .release .notes:empty { display: none; }
 
+/* feedback */
+.feedback { background: linear-gradient(135deg, rgba(255,111,174,.10), rgba(155,123,255,.10) 55%, rgba(61,214,255,.08)); border: 1px solid var(--line); border-radius: var(--radius); padding: 40px; }
+.fb-lead { color: var(--muted); max-width: 620px; margin: 0 0 26px; }
+.fb-note { color: var(--muted); font-size: 14px; margin: 18px 0 0; }
+@media (max-width: 860px) { .feedback { padding: 26px 20px; } }
+
 /* faq */
 details { border-bottom: 1px solid var(--line); padding: 18px 4px; }
 summary { cursor: pointer; font-weight: 700; font-size: 18px; list-style: none; display: flex; justify-content: space-between; gap: 16px; }
@@ -147,6 +153,7 @@ footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wr
       <a href="#features" data-i18n="navFeatures">Возможности</a>
       <a href="#release" data-i18n="navRelease">Что нового</a>
       <a href="#faq" data-i18n="navFaq">Вопросы</a>
+      <a href="#feedback" data-i18n="navFeedback">Обратная связь</a>
       <a href="https://github.com/Surse231/jeem">GitHub</a>
     </nav>
     <div class="lang" role="group" aria-label="Language">
@@ -267,6 +274,28 @@ footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wr
   </section>
 </main>
 
+<section id="feedback">
+  <div class="wrap reveal">
+    <div class="feedback">
+      <div class="kicker" data-i18n="kFb">Обратная связь</div>
+      <h2 data-i18n="hFb">Нашёл баг или есть идея?</h2>
+      <p class="fb-lead" data-i18n="pFb">Расскажи, что сломалось или чего не хватает в Jeem — я читаю всё и учитываю в следующих версиях.</p>
+      <div class="cta" style="justify-content:flex-start">
+        <a class="btn btn-main" href="https://github.com/Surse231/jeem/issues/new?template=bug.yml" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v5M12 17h.01M10.3 3.9 2.4 17.5A2 2 0 0 0 4.1 20.5h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+          <span data-i18n="fbBug">Сообщить о баге</span>
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/Surse231/jeem/issues/new?template=idea.yml" target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.9.7 1.5 1.6 1.5 2.6V17h4v-.5c0-1 .6-1.9 1.5-2.6A6 6 0 0 0 12 3Z"/></svg>
+          <span data-i18n="fbIdea">Предложить идею</span>
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/Surse231/jeem/issues" target="_blank" rel="noopener" data-i18n="fbAll">Все обращения</a>
+      </div>
+      <p class="fb-note" data-i18n="fbNote">Форма открывается на GitHub — нужен бесплатный аккаунт. Не публикуй пароли и личные данные.</p>
+    </div>
+  </div>
+</section>
+
 <footer>
   <div class="wrap">
     <span>Jeem · <span data-i18n="license">Открытый код, лицензия MIT</span></span>
@@ -277,7 +306,11 @@ footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wr
 <script>
 const I18N = {
   en: {
-    navFeatures: 'Features', navRelease: "What's new", navFaq: 'FAQ',
+    navFeatures: 'Features', navRelease: "What's new", navFaq: 'FAQ', navFeedback: 'Feedback',
+    kFb: 'Feedback', hFb: 'Found a bug or have an idea?',
+    pFb: 'Tell me what is broken or what is missing in Jeem — I read everything and use it for the next versions.',
+    fbBug: 'Report a bug', fbIdea: 'Suggest an idea', fbAll: 'All reports',
+    fbNote: 'The form opens on GitHub — a free account is needed. Please do not post passwords or personal data.',
     heroA: 'All your music —', heroB: 'in one place',
     lead: 'YouTube Music, YouTube and SoundCloud in one Windows app. Free, no ads, no subscriptions.',
     download: 'Download for Windows', source: 'Source code',
