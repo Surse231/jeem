@@ -16757,14 +16757,8 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
 
   function switchView(viewName) {
     if (viewName !== state.currentView) favGhosts = [];
-    // The My Vibe page uses the whole window: the right panel steps aside and returns when the page is left.
-    if (viewName === 'wave' && state.currentView !== 'wave') {
-      state._rpBeforeWave = !!state.isRightPanelOpen;
-      if (state.isRightPanelOpen && el.btnCloseRightPanel) el.btnCloseRightPanel.click();
-    } else if (viewName !== 'wave' && state.currentView === 'wave' && state._rpBeforeWave) {
-      state._rpBeforeWave = false;
-      if (!state.isRightPanelOpen && el.btnToggleLyricsPanel) el.btnToggleLyricsPanel.click();
-    }
+    // The My Vibe page uses the whole window: the right panel stays hidden there (its state is kept for the other pages).
+    document.body.classList.toggle('wave-view', viewName === 'wave');
     if (viewName !== 'artist' && viewName !== 'album' && viewName !== 'playlist-detail' && viewName !== 'settings') {
       if (viewName === 'discover') {
         if (!navSearchPending) {
@@ -27484,7 +27478,7 @@ function bindCoverHoldZoom(wrapEl) {
     const box = document.getElementById('wave-settings');
     if (!box) return;
     const cur = getWaveSettings();
-    box.innerHTML = WAVE_GROUPS.map(g => `
+    box.innerHTML = `<button type="button" class="wave-settings-close" id="btn-wave-settings-close" title="${escapeHtml(t('Close'))}" aria-label="${escapeHtml(t('Close'))}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>` + WAVE_GROUPS.map(g => `
       <div class="wave-group">
         <div class="wave-group-title">${escapeHtml(t(g.title))}</div>
         <div class="wave-chips">${g.options.map(([val, label]) => `<button type="button" class="wave-chip${cur[g.key] === val ? ' active' : ''}" data-group="${g.key}" data-val="${val}">${escapeHtml(t(label))}</button>`).join('')}</div>
@@ -27521,6 +27515,8 @@ function bindCoverHoldZoom(wrapEl) {
       });
     });
     bindWaveAiGroup(box);
+    const closeBtn = box.querySelector('#btn-wave-settings-close');
+    if (closeBtn) closeBtn.addEventListener('click', () => { if (typeof window.closeWaveSettings === 'function') window.closeWaveSettings(); });
     const reset = box.querySelector('#btn-wave-reset');
     if (reset) reset.addEventListener('click', () => {
       try { localStorage.removeItem(WAVE_SETTINGS_KEY); localStorage.removeItem('jeem_region_override'); } catch (_) {}
@@ -27585,11 +27581,31 @@ function bindCoverHoldZoom(wrapEl) {
     });
     const settingsBtn = document.getElementById('btn-wave-settings');
     const settingsBox = document.getElementById('wave-settings');
+    const closeWaveSettings = () => {
+      if (!settingsBox || settingsBox.classList.contains('hidden')) return;
+      settingsBox.classList.add('hidden');
+      if (settingsBtn) settingsBtn.classList.remove('active');
+    };
+    window.closeWaveSettings = closeWaveSettings;
     if (settingsBtn && settingsBox) settingsBtn.addEventListener('click', () => {
       const open = settingsBox.classList.toggle('hidden') === false;
       settingsBtn.classList.toggle('active', open);
       if (open) renderWaveSettings();
     });
+    if (settingsBox) {
+      // a click on the page outside the settings, or Escape, closes them
+      const stage = document.querySelector('#view-wave .wave-stage');
+      if (stage) stage.addEventListener('click', (e) => {
+        if (e.target.closest('#wave-settings') || e.target.closest('#btn-wave-settings')) return;
+        closeWaveSettings();
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && state.currentView === 'wave' && !settingsBox.classList.contains('hidden')) {
+          e.stopPropagation();
+          closeWaveSettings();
+        }
+      }, true);
+    }
     const like = document.getElementById('btn-wave-like');
     if (like) like.addEventListener('click', waveLikeCurrent);
     const dislike = document.getElementById('btn-wave-dislike');

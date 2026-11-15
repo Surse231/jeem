@@ -14982,3 +14982,9 @@ body.perf .jeem-hero-banner--brand .jb-blob { animation: none; }
 #btn-tvk-dislike.hidden { display: none !important; }
 #btn-tvk-like.active { background: rgba(255, 255, 255, 0.92); color: #101315; }
 #btn-tvk-like.active svg { fill: currentColor; }
+
+/* My Vibe: the right panel does not take space from the full-page banner */
+body.wave-view #right-panel { display: none !important; }
+#view-wave .wave-settings { padding-top: 52px; }
+.wave-settings-close { position: absolute; top: 12px; right: 12px; z-index: 4; width: 36px; height: 36px; border-radius: 50%; border: 0; cursor: pointer; display: grid; place-items: center; color: #fff; background: rgba(255,255,255,.14); transition: background .2s, transform .2s; }
+.wave-settings-close:hover { background: rgba(255,255,255,.28); transform: scale(1.06); }
