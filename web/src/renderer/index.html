@@ -387,6 +387,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
 
     <div class="platform-switch-container">
       <div class="platform-pill-switch">
+        <span class="platform-indicator" aria-hidden="true"></span>
         <button class="platform-btn" data-platform="all" id="platform-all" title="All platforms (YouTube Music and SoundCloud)">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
           <span data-i18n>All platforms</span>
@@ -864,6 +865,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
       <section class="content-view" id="view-wave">
         <div class="wave-stage">
           <div class="wave-cover-bg" id="wave-cover-bg" aria-hidden="true"></div>
+          <div class="wave-disc">
           <div class="wave-blob" aria-hidden="true"><span></span><span></span><span></span></div>
           <div class="wave-center">
             <h1 class="wave-title" data-i18n>My Vibe</h1>
@@ -885,6 +887,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                 <span data-i18n>Tune</span>
               </button>
             </div>
+          </div>
           </div>
         </div>
         <div class="wave-settings hidden" id="wave-settings"></div>
@@ -4364,7 +4367,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
       <div class="tv-bg-layer" id="tv-bg-layer-b"></div>
     </div>
     <button class="tv-karaoke-close" id="btn-tvk-karaoke-mode" title="Karaoke on / off" aria-label="Karaoke on / off" style="right: 236px;">
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 11a7 7 0 0 1-14 0"></path><line x1="12" y1="18" x2="12" y2="22"></line></svg>
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path><path d="M19 11a7 7 0 0 1-14 0"></path><line x1="12" y1="18" x2="12" y2="22"></line><line class="karaoke-off-slash" x1="4" y1="4" x2="20" y2="20"></line></svg>
     </button>
     <button class="tv-karaoke-close" id="btn-tvk-edit-lyrics" title="Edit lyrics" aria-label="Edit lyrics" style="right: 184px;">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -4584,6 +4587,8 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
             <svg id="tvk-volume-muted-icon" class="hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
           </button>
           <input type="range" class="pill-range" id="tvk-volume-slider" min="0" max="1" step="0.01" value="0.5">
+        </div>
+        <div class="tvk-rate-row" id="tvk-rate-row">
           <button class="control-btn tvk-rate-btn hidden" id="btn-tvk-dislike" title="Not for me" aria-label="Not for me">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"></path></svg>
           </button>

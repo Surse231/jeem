@@ -1013,7 +1013,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     _isNaturalEnding: false,
     _skipRecordedFor: null,
     isRightPanelOpen: true,
-    lyricsMode: 'word',
+    lyricsMode: 'line',
     uiScale: savedScale,
     activePresetId: soundPersistenceEnabled ? (localStorage.getItem('jeem_active_preset') || 'p_default') : 'p_default',
     themeMode: localStorage.getItem('jeem_theme_mode') || 'dark',
@@ -3411,6 +3411,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   let lastFrameTime = 0;
+  let waveMood = null;
   function startVisualizers() {
     if (!state.isWindowVisible) return;
     if (animationFrameId) cancelAnimationFrame(animationFrameId);
@@ -3478,8 +3479,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       const isBehindVizVisible = (document.body.classList.contains('bar-viz-behind') || isVizConnectedMode()) && localStorage.getItem('jeem_bar_wave') !== '0' && !document.body.classList.contains('mini') && !document.hidden;
       const needBassPulse = !!(state.vfx && state.vfx.bassPulse);
       const activeGap = document.querySelector('.lyric-line.lyric-gap.active');
+      const waveViewEl = document.body.classList.contains('wave-view') ? document.getElementById('view-wave') : null;
+      const needWaveBeat = !!(waveViewEl && waveViewEl.classList.contains('active'));
 
-      if (!document.body.classList.contains('perf') && (isVisualizerVisible || isTvkVisualizerVisible || isBehindVizVisible || needBassPulse || activeGap)) {
+      if (!document.body.classList.contains('perf') && (isVisualizerVisible || isTvkVisualizerVisible || isBehindVizVisible || needBassPulse || needWaveBeat || activeGap)) {
         if (!freqData && audioEngine && audioEngine.getAnalyserNode) {
           const an = audioEngine.getAnalyserNode();
           if (an && an.frequencyBinCount) {
@@ -3511,6 +3514,37 @@ document.addEventListener('DOMContentLoaded', async () => {
           }
 
           let bassEnergy = (freqData[0] + freqData[1] + freqData[2] + freqData[3]) / (4 * 255);
+
+          if (needWaveBeat) {
+            const avg = (from, to) => { let t = 0; for (let i = from; i < to; i++) t += freqData[i] || 0; return t / ((to - from) * 255); };
+            const playing = state.isPlaying;
+            waveViewEl.style.setProperty('--wave-b', playing ? Math.min(1, bassEnergy * 1.25).toFixed(3) : '0');
+            waveViewEl.style.setProperty('--wave-m', playing ? Math.min(1, avg(6, 20) * 1.6).toFixed(3) : '0');
+            waveViewEl.style.setProperty('--wave-h', playing ? Math.min(1, avg(24, 60) * 2.4).toFixed(3) : '0');
+            // the mood of the track is guessed from how loud and how bright it sounds (slow average over a few seconds)
+            const mood = waveMood || (waveMood = { id: '', e: 0.25, c: 0.07 });
+            const tid = state.currentTrack ? String(state.currentTrack.id || state.currentTrack.title || '') : '';
+            if (mood.id !== tid) mood.id = tid;
+            if (playing) {
+              const n = Math.max(8, Math.floor(freqData.length * 0.6));
+              let sum = 0, wsum = 0;
+              for (let i = 1; i < n; i++) { sum += freqData[i]; wsum += freqData[i] * i; }
+              if (sum > n * 4) {
+                mood.e += ((sum / (n * 255)) - mood.e) * 0.012;
+                mood.c += ((wsum / sum / freqData.length) - mood.c) * 0.012;
+              }
+            }
+            const eN = Math.max(0, Math.min(1, (mood.e - 0.14) / 0.3));
+            const cN = Math.max(0, Math.min(1, (mood.c - 0.035) / 0.1));
+            const sad = (1 - eN) * 0.6 + (1 - cN) * 0.4;
+            const calm = (1 - eN) * 0.6 + cN * 0.4;
+            const happy = eN * 0.6 + cN * 0.4;
+            const mean = (sad + calm + happy) / 3;
+            const lift = (v) => Math.max(-0.35, Math.min(0.45, (v - mean) * 1.4)).toFixed(3);
+            waveViewEl.style.setProperty('--wave-mood-sad', lift(sad));
+            waveViewEl.style.setProperty('--wave-mood-calm', lift(calm));
+            waveViewEl.style.setProperty('--wave-mood-happy', lift(happy));
+          }
 
           if (needBassPulse) {
             const scaleMul = 1.0 + (bassEnergy * 0.035);
@@ -17670,6 +17704,20 @@ function bindCoverHoldZoom(wrapEl) {
     setPlatform(platform, triggerSearch);
   }
 
+  /* The highlight under the active platform slides to the next one, like the highlight in the side bar. */
+  function movePlatformIndicator(animate) {
+    const pill = document.querySelector('.platform-pill-switch');
+    const ind = pill && pill.querySelector('.platform-indicator');
+    const active = pill && pill.querySelector('.platform-btn.active');
+    if (!ind) return;
+    if (!active || !active.offsetWidth) { ind.style.opacity = '0'; return; }
+    if (!animate) ind.style.transition = 'none';
+    ind.style.width = active.offsetWidth + 'px';
+    ind.style.transform = `translateX(${active.offsetLeft}px)`;
+    ind.style.opacity = '1';
+    if (!animate) { void ind.offsetWidth; ind.style.transition = ''; }
+  }
+
   function setPlatform(platform, triggerSearch = true) {
     if (!['all', 'youtube', 'ytmusic', 'soundcloud'].includes(platform)) platform = 'ytmusic';
     state.platform = platform;
@@ -17693,10 +17741,21 @@ function bindCoverHoldZoom(wrapEl) {
       });
     }
 
+    movePlatformIndicator(!!triggerSearch);
     if (triggerSearch && el.searchInput && el.searchInput.value.trim()) {
       performSearch(el.searchInput.value);
     }
   }
+
+  (function watchPlatformIndicator() {
+    const pill = document.querySelector('.platform-pill-switch');
+    if (!pill) return;
+    // the switch changes size with the window and the compact mode: the highlight follows without a delay
+    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => movePlatformIndicator(false)).observe(pill);
+    window.addEventListener('resize', () => movePlatformIndicator(false));
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => movePlatformIndicator(false));
+    setTimeout(() => movePlatformIndicator(false), 400);
+  })();
 
   const savedPlatform = localStorage.getItem('jeem_platform') || 'ytmusic';
   setPlatform(savedPlatform, false);
@@ -27387,10 +27446,10 @@ function bindCoverHoldZoom(wrapEl) {
   function waveLikeCurrent() {
     const cur = state.currentTrack;
     if (!cur) return;
-    const wasLiked = state.favorites.some(f => isSameTrack(f, cur));
+    // A like only saves the track: the queue that is already lined up stays as it is.
+    // The like counts the next time My Vibe picks more tracks (the liked tracks are what it picks from).
     toggleFavoriteTrack(cur);
     renderWavePage();
-    if (!wasLiked && state.myWaveActive) rebuildWaveQueue(false, null, { likedNow: [cur] });
   }
   window.jeemWaveLike = waveLikeCurrent;
   window.jeemWaveDislike = waveDislikeCurrent;
@@ -27523,6 +27582,43 @@ function bindCoverHoldZoom(wrapEl) {
     try { renderTrending(); } catch (_) {}
   }
 
+  // Replaces plain <select> elements (white native list) with the app's own dropdown; the select stays hidden and keeps the value
+  function upgradeSelectsToDropdowns(root) {
+    root.querySelectorAll('select.wave-select').forEach(sel => {
+      const dd = document.createElement('div');
+      dd.className = 'm3-dropdown wave-dd';
+      const cur = sel.options[sel.selectedIndex];
+      dd.innerHTML = `<button class="m3-dropdown-trigger" type="button"><span class="m3-dropdown-label">${escapeHtml(cur ? cur.textContent : '')}</span><svg class="m3-dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg></button><div class="m3-dropdown-menu">${Array.from(sel.options).map(o => `<button class="m3-dropdown-option${o.selected ? ' selected' : ''}" type="button" data-value="${escapeHtml(o.value)}">${escapeHtml(o.textContent)}</button>`).join('')}</div>`;
+      sel.style.display = 'none';
+      sel.parentNode.insertBefore(dd, sel.nextSibling);
+      const trigger = dd.querySelector('.m3-dropdown-trigger');
+      trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        root.querySelectorAll('.m3-dropdown.open').forEach(o => { if (o !== dd) o.classList.remove('open'); });
+        dd.classList.toggle('open');
+        const sel0 = dd.querySelector('.m3-dropdown-option.selected');
+        if (dd.classList.contains('open')) {
+          const menu = dd.querySelector('.m3-dropdown-menu');
+          if (sel0) menu.scrollTop = Math.max(0, sel0.offsetTop - 80);
+          setTimeout(() => menu.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 30);
+        }
+      });
+      dd.querySelectorAll('.m3-dropdown-option').forEach(opt => opt.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dd.classList.remove('open');
+        if (sel.value === opt.dataset.value) return;
+        sel.value = opt.dataset.value;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        trigger.querySelector('.m3-dropdown-label').textContent = opt.textContent;
+        dd.querySelectorAll('.m3-dropdown-option').forEach(o => o.classList.toggle('selected', o === opt));
+      }));
+    });
+    if (!root._ddCloser) {
+      root._ddCloser = true;
+      document.addEventListener('click', () => root.querySelectorAll('.m3-dropdown.open').forEach(o => o.classList.remove('open')));
+    }
+  }
+
   function renderWaveSettings() {
     const box = document.getElementById('wave-settings');
     if (!box) return;
@@ -27564,6 +27660,7 @@ function bindCoverHoldZoom(wrapEl) {
       });
     });
     bindWaveAiGroup(box);
+    upgradeSelectsToDropdowns(box);
     const closeBtn = box.querySelector('#btn-wave-settings-close');
     if (closeBtn) closeBtn.addEventListener('click', () => { if (typeof window.closeWaveSettings === 'function') window.closeWaveSettings(); });
     const reset = box.querySelector('#btn-wave-reset');
@@ -27604,16 +27701,30 @@ function bindCoverHoldZoom(wrapEl) {
       if (url && coverBg.dataset.src !== url) {
         coverBg.dataset.src = url;
         const img = new Image();
-        img.onload = () => { coverBg.style.backgroundImage = `url("${url}")`; coverBg.classList.add('on'); };
-        img.onerror = () => { coverBg.classList.remove('on'); };
+        img.onload = () => { coverBg.style.backgroundImage = `url("${url}")`; coverBg.classList.add('on'); setWaveAppBg(url); };
+        img.onerror = () => { coverBg.classList.remove('on'); setWaveAppBg(''); };
         img.src = url;
       } else if (!url) {
         coverBg.dataset.src = '';
         coverBg.classList.remove('on');
+        setWaveAppBg('');
       }
     }
     const likeBtn = document.getElementById('btn-wave-like');
     if (likeBtn && active) likeBtn.classList.toggle('active', state.favorites.some(f => isSameTrack(f, state.currentTrack)));
+  }
+
+  // the blurred cover of the playing track behind the whole window (only while My Vibe is open)
+  function setWaveAppBg(url) {
+    let bg = document.getElementById('wave-app-bg');
+    if (!bg) {
+      bg = document.createElement('div');
+      bg.id = 'wave-app-bg';
+      document.body.insertBefore(bg, document.body.firstChild);
+    }
+    if (url) bg.style.backgroundImage = `url("${url}")`;
+    bg.classList.toggle('on', !!url);
+    document.body.classList.toggle('wave-cover-on', !!url);
   }
 
   function initWave() {

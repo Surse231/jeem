@@ -14986,11 +14986,121 @@ body.wave-view:not(.wave-rp-open) #right-panel { display: none !important; }
 .wave-settings-close:hover { background: rgba(255,255,255,.28); transform: scale(1.06); }
 
 /* karaoke view: like and dislike beside the volume */
-.tvk-volume-row .tvk-rate-btn { flex: 0 0 auto; margin-left: 4px; }
-.tvk-volume-row .tvk-rate-btn.hidden { display: none !important; }
-.tvk-volume-row .tvk-rate-btn.active { color: var(--md-sys-color-primary, #fff); }
-.tvk-volume-row .tvk-rate-btn.active svg { fill: currentColor; }
 #btn-tvk-karaoke-mode { right: 236px !important; }
-#btn-tvk-karaoke-mode.off { opacity: .6; }
-#btn-tvk-karaoke-mode.off::after { content: ""; position: absolute; width: 26px; height: 2px; background: currentColor; transform: rotate(-45deg); border-radius: 2px; }
 #btn-toggle-dislike.hidden { display: none !important; }
+
+/* like and dislike under the volume slider */
+.tvk-rate-row { display: flex; justify-content: center; align-items: center; gap: 14px; margin-top: 6px; }
+.tvk-rate-row .tvk-rate-btn.hidden { display: none !important; }
+.tvk-rate-row .tvk-rate-btn.active { color: var(--md-sys-color-primary, #fff); }
+.tvk-rate-row .tvk-rate-btn.active svg { fill: currentColor; }
+/* karaoke button: the straight slash is drawn when karaoke is off */
+#btn-tvk-karaoke-mode .karaoke-off-slash { display: none; }
+#btn-tvk-karaoke-mode.off .karaoke-off-slash { display: block; }
+#btn-tvk-karaoke-mode.off { opacity: .75; }
+
+/* platform switch: one highlight that glides from one platform to the next */
+.platform-pill-switch { position: relative; }
+.platform-pill-switch .platform-btn { position: relative; z-index: 1; }
+.platform-pill-switch .platform-btn.active { background: transparent; }
+.platform-indicator { position: absolute; top: 4px; bottom: 4px; left: 0; width: 0; border-radius: var(--md-shape-corner-full, 999px); background: var(--md-sys-color-secondary-container); opacity: 0; z-index: 0; pointer-events: none; will-change: transform, width; transition: transform .42s cubic-bezier(.3, 1.3, .5, 1), width .42s cubic-bezier(.3, 1.3, .5, 1), opacity .2s ease; }
+body.no-nav-transition .platform-indicator, body.is-window-resizing .platform-indicator { transition: none !important; }
+
+
+/* My Vibe: the whole page is the blurred cover of the track; the coloured banner is a round disc behind the title, play and like only */
+#view-wave .wave-stage { align-items: center; justify-content: center; }
+#view-wave .wave-cover-bg { filter: blur(22px) saturate(150%) brightness(.72); }
+#view-wave .wave-stage::after { background: radial-gradient(70% 70% at 50% 50%, rgba(0,0,0,.12), rgba(0,0,0,.5)); }
+.wave-disc { position: relative; z-index: 2; width: clamp(300px, min(46vw, 62vh), 470px); aspect-ratio: 1; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #1b1b20; box-shadow: 0 34px 90px rgba(0, 0, 0, .5), 0 0 0 1px rgba(255, 255, 255, .08); flex: 0 0 auto; }
+.wave-disc .wave-blob { position: absolute; inset: 0; filter: blur(46px) saturate(150%); opacity: .95; }
+.wave-disc .wave-center { position: relative; z-index: 1; max-width: 100%; width: 100%; padding: 0 13%; gap: clamp(8px, 1.6vh, 14px); }
+.wave-disc .wave-title { font-size: calc(clamp(30px, 5.2vmin, 46px) * var(--font-scale, 1)); }
+.wave-disc .wave-now { max-width: 100%; white-space: normal; text-align: center; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.wave-disc .wave-play { width: clamp(64px, 11vmin, 84px); height: clamp(64px, 11vmin, 84px); }
+@media (max-height: 560px) { .wave-disc { width: clamp(240px, 62vh, 330px); } .wave-disc .wave-center { gap: 6px; } }
+
+/* My Vibe: before a track plays the page keeps the theme background; the cover appears only once it is loaded */
+#view-wave .wave-stage { background: transparent; }
+#view-wave .wave-stage::after { opacity: 0; transition: opacity .9s ease; }
+#view-wave .wave-stage:has(.wave-cover-bg.on)::after { opacity: 1; }
+.wave-disc { width: clamp(260px, min(40vw, 54vh), 400px); }
+@media (max-height: 560px) { .wave-disc { width: clamp(220px, 54vh, 290px); } }
+
+/* My Vibe: no shadow under the disc */
+.wave-disc { box-shadow: none; }
+
+/* My Vibe: the page fills the whole content area, so the cover covers everything */
+#view-wave.active { position: absolute; inset: 0; height: auto; min-height: 0; }
+
+/* My Vibe: the cover also fills the gap between the page and the bottom player */
+#view-wave.active .wave-center { padding-bottom: 0; }
+#view-wave .wave-stage { border-radius: 28px; }
+
+/* Less empty space between the page and the bottom player on every page */
+body:not(.classic-sidebar):not(.mini) .app-layout {
+  margin-bottom: 34px !important;
+  height: calc(100vh - 40px - 64px - 34px) !important;
+  max-height: calc(100vh - 40px - 64px - 34px) !important;
+}
+body.hide-titlebar:not(.classic-sidebar):not(.mini) .app-layout {
+  height: calc(100vh - 64px - 34px) !important;
+  max-height: calc(100vh - 64px - 34px) !important;
+}
+
+/* My Vibe: the three colours drift faster and each one pulses with a part of the music (bass, mids, highs) */
+.wave-disc .wave-blob span { animation-name: wave-drift-live; transition: scale .09s linear; }
+.wave-disc .wave-blob span:nth-child(1) { animation-duration: 18s; animation-delay: 0s; scale: calc(1 + var(--wave-b, 0) * .55 + var(--wave-mood-sad, 0)); }
+.wave-disc .wave-blob span:nth-child(2) { animation-duration: 24s; animation-delay: -8s; scale: calc(1 + var(--wave-m, 0) * .55 + var(--wave-mood-calm, 0)); }
+.wave-disc .wave-blob span:nth-child(3) { animation-duration: 30s; animation-delay: -16s; scale: calc(1 + var(--wave-h, 0) * .55 + var(--wave-mood-happy, 0)); }
+@keyframes wave-drift-live {
+  0% { transform: translate(-18%, -12%) rotate(0deg); }
+  33% { transform: translate(34%, 8%) rotate(60deg); }
+  66% { transform: translate(8%, 36%) rotate(130deg); }
+  100% { transform: translate(-30%, 22%) rotate(200deg); }
+}
+
+/* My Vibe: the disc is a soft living blob instead of a perfect circle */
+.wave-disc { border-radius: 50% 50% 50% 50% / 50% 50% 50% 50%; animation: wave-disc-morph 16s ease-in-out infinite; animation-play-state: paused; }
+#view-wave.is-wave-playing .wave-disc { animation-play-state: running; }
+@keyframes wave-disc-morph {
+  0%   { border-radius: 54% 46% 52% 48% / 48% 54% 46% 52%; }
+  25%  { border-radius: 47% 53% 44% 56% / 55% 45% 56% 44%; }
+  50%  { border-radius: 52% 48% 57% 43% / 44% 56% 45% 55%; }
+  75%  { border-radius: 45% 55% 49% 51% / 53% 47% 55% 45%; }
+  100% { border-radius: 54% 46% 52% 48% / 48% 54% 46% 52%; }
+}
+
+/* My Vibe: the blurred cover is the background of the whole window */
+#wave-app-bg { position: fixed; inset: -60px; z-index: 0; background-size: cover; background-position: center; filter: blur(30px) saturate(150%) brightness(.7); opacity: 0; pointer-events: none; transition: opacity .9s ease; }
+body.wave-view.wave-cover-on #wave-app-bg { opacity: 1; }
+body.wave-view.wave-cover-on #view-wave .wave-cover-bg { display: none; }
+body.wave-view.wave-cover-on #view-wave .wave-stage::after { display: none; }
+body.wave-view.wave-cover-on { background: transparent !important; }
+html body.wave-view.wave-cover-on.wave-cover-on { background: transparent !important; background-image: none !important; }
+html body.wave-view.wave-cover-on.wave-cover-on .sidebar { background: transparent !important; }
+html body.wave-view.wave-cover-on.wave-cover-on .playbar { background: transparent !important; box-shadow: none !important; }
+html body.wave-view.wave-cover-on.wave-cover-on :is(.sidebar, .playbar, .titlebar) { --md-sys-color-on-surface: #fff; --md-sys-color-on-surface-variant: rgba(255,255,255,.78); --md-sys-color-outline: rgba(255,255,255,.4); color: #fff; }
+html body.wave-view.wave-cover-on.wave-cover-on :is(.sidebar, .playbar, .titlebar) :is(svg, .icon, i) { color: #fff; }
+body.wave-view.wave-cover-on #view-wave .wave-stage { border-radius: 0; }
+body.wave-view.wave-cover-on .sidebar::before, body.wave-view.wave-cover-on .sidebar::after, body.wave-view.wave-cover-on .playbar::after, body.wave-view.wave-cover-on .playbar::before { display: none !important; }
+
+/* My Vibe: when the page opens, the cover spreads softly from the centre over the whole window (no hard edge) */
+@property --wave-spread { syntax: '<percentage>'; inherits: false; initial-value: 0%; }
+body.wave-view.wave-cover-on #wave-app-bg { opacity: 1; transition: none; animation: wave-bg-spread 1.4s cubic-bezier(.3, .6, .25, 1) both; -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 var(--wave-spread), transparent calc(var(--wave-spread) + 45%)); mask-image: radial-gradient(circle at 50% 50%, #000 var(--wave-spread), transparent calc(var(--wave-spread) + 45%)); }
+@keyframes wave-bg-spread {
+  0%   { --wave-spread: -45%; }
+  100% { --wave-spread: 100%; }
+}
+
+/* My Vibe settings: no extra shadow */
+#view-wave .wave-settings { box-shadow: none !important; filter: none; }
+
+/* My Vibe settings: dropdowns in the app style on the dark glass panel */
+#view-wave .wave-settings .wave-dd { flex: 0 0 auto; width: auto; min-width: 150px; }
+#view-wave .wave-settings .wave-group > .wave-dd { width: 100%; max-width: 360px; }
+#view-wave .wave-settings .m3-dropdown-trigger { background: rgba(255,255,255,.12); color: #fff; }
+#view-wave .wave-settings .m3-dropdown-trigger:hover { background: rgba(255,255,255,.2); }
+#view-wave .wave-settings .m3-dropdown-trigger .m3-dropdown-arrow { color: rgba(255,255,255,.75); }
+#view-wave .wave-settings .m3-dropdown-menu { max-height: 210px; overflow-y: auto; background: rgba(24,24,30,.96) !important; }
+#view-wave .wave-settings .m3-dropdown-option { color: #fff; }
+#view-wave .wave-settings .m3-dropdown-option:hover { background: rgba(255,255,255,.12); }
