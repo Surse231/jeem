@@ -14948,7 +14948,8 @@ body.mini #playbar-artwork-wrapper::after { display: none; }
 
 /* YouTube is a separate, free search: it sits apart from the music sources */
 .platform-sep { display: inline-block; width: 1px; align-self: stretch; margin: 6px 4px; background: var(--md-sys-color-outline-variant, rgba(255,255,255,.18)); flex: 0 0 1px; }
-body.compact-engine-btns .platform-sep { display: none; }
+body.compact-engine-btns .platform-sep { display: inline-block; margin: 6px 6px; }
+#platform-yt { margin-left: 6px; }
 .yt-warning-card { max-width: 460px; }
 .yt-warning-card p { margin: 8px 0 14px; color: var(--md-sys-color-on-surface-variant); font-size: calc(13.5px * var(--font-scale, 1)); line-height: 1.5; }
 .yt-warning-check { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; cursor: pointer; user-select: none; font-size: calc(13.5px * var(--font-scale, 1)); }
@@ -14977,14 +14978,19 @@ body.perf .jeem-hero-banner--brand .jb-blob { animation: none; }
 .jb-author img { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; }
 .jb-author span { padding-left: 2px; }
 
-#btn-tvk-like { right: 236px !important; }
-#btn-tvk-dislike { right: 288px !important; }
-#btn-tvk-dislike.hidden { display: none !important; }
-#btn-tvk-like.active { background: rgba(255, 255, 255, 0.92); color: #101315; }
-#btn-tvk-like.active svg { fill: currentColor; }
 
 /* My Vibe: the right panel does not take space from the full-page banner */
-body.wave-view #right-panel { display: none !important; }
+body.wave-view:not(.wave-rp-open) #right-panel { display: none !important; }
 #view-wave .wave-settings { padding-top: 52px; }
 .wave-settings-close { position: absolute; top: 12px; right: 12px; z-index: 4; width: 36px; height: 36px; border-radius: 50%; border: 0; cursor: pointer; display: grid; place-items: center; color: #fff; background: rgba(255,255,255,.14); transition: background .2s, transform .2s; }
 .wave-settings-close:hover { background: rgba(255,255,255,.28); transform: scale(1.06); }
+
+/* karaoke view: like and dislike beside the volume */
+.tvk-volume-row .tvk-rate-btn { flex: 0 0 auto; margin-left: 4px; }
+.tvk-volume-row .tvk-rate-btn.hidden { display: none !important; }
+.tvk-volume-row .tvk-rate-btn.active { color: var(--md-sys-color-primary, #fff); }
+.tvk-volume-row .tvk-rate-btn.active svg { fill: currentColor; }
+#btn-tvk-karaoke-mode { right: 236px !important; }
+#btn-tvk-karaoke-mode.off { opacity: .6; }
+#btn-tvk-karaoke-mode.off::after { content: ""; position: absolute; width: 26px; height: 2px; background: currentColor; transform: rotate(-45deg); border-radius: 2px; }
+#btn-toggle-dislike.hidden { display: none !important; }

@@ -6228,6 +6228,11 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       updateLyricsTranslationUI();
       renderLyricsView();
+      // the full-screen lyrics view: the new lyrics show at once (the view was marked "no lyrics" while they loaded)
+      if (state.isTvKaraokeOpen) {
+        syncTvLayout(false);
+        requestAnimationFrame(() => { updateLyricsPadding(); state.forceSnapLyrics = true; state.forceLyricsScroll = true; });
+      }
       if (!isLyricsFullscreenOnly()) {
         setRightPanelLyricsEmptySmooth(false);
         const rpCreditsCard = document.getElementById('rp-credits-card');
@@ -8346,6 +8351,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function openTvKaraoke() {
     if (typeof window.syncLyricsLikeButtons === 'function') window.syncLyricsLikeButtons();
+    if (typeof window.syncTvkKaraokeButton === 'function') window.syncTvkKaraokeButton();
     if (!el.tvKaraoke || !el.lyricsContainer) return;
     if (state.isTvKaraokeOpen) return;
     state.isTvKaraokeOpen = true;
@@ -14569,6 +14575,8 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
     const tvDislike = document.getElementById('btn-tvk-dislike');
     if (tvLike) tvLike.classList.toggle('active', !!cur && state.favorites.some(f => isSameTrack(f, cur)));
     if (tvDislike) tvDislike.classList.toggle('hidden', !(cur && state.myWaveActive));
+    const pbDislike = document.getElementById('btn-toggle-dislike');
+    if (pbDislike) pbDislike.classList.toggle('hidden', !(cur && state.myWaveActive));
   }
   window.syncLyricsLikeButtons = syncLyricsLikeButtons;
 
@@ -16759,6 +16767,7 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
     if (viewName !== state.currentView) favGhosts = [];
     // The My Vibe page uses the whole window: the right panel stays hidden there (its state is kept for the other pages).
     document.body.classList.toggle('wave-view', viewName === 'wave');
+    document.body.classList.remove('wave-rp-open');
     if (viewName !== 'artist' && viewName !== 'album' && viewName !== 'playlist-detail' && viewName !== 'settings') {
       if (viewName === 'discover') {
         if (!navSearchPending) {
@@ -17359,6 +17368,20 @@ function updateNavIndicator(animate) {
 
   if (el.btnToggleLyricsPanel) {
     el.btnToggleLyricsPanel.addEventListener('click', () => {
+      if (document.body.classList.contains('wave-view')) {
+        // on the My Vibe page the panel is hidden until it is asked for
+        const shown = document.body.classList.toggle('wave-rp-open');
+        state.isRightPanelOpen = shown;
+        if (el.rightPanel) el.rightPanel.classList.toggle('hidden', !shown);
+        el.btnToggleLyricsPanel.classList.toggle('active', shown);
+        if (shown) {
+          updateLyricsPadding();
+          state.forceSnapLyrics = true; state.forceLyricsScroll = true; state.lastActiveLyricIdx = -1;
+          if (el.nativeAudio) updateSyncedLyricsHighlight(el.nativeAudio.currentTime || 0);
+        }
+        setTimeout(resizeCanvases, 150);
+        return;
+      }
       state.isRightPanelOpen = !state.isRightPanelOpen;
       if (el.rightPanel) el.rightPanel.classList.toggle('hidden', !state.isRightPanelOpen);
       el.btnToggleLyricsPanel.classList.toggle('active', state.isRightPanelOpen);
@@ -17403,6 +17426,7 @@ function updateNavIndicator(animate) {
 
   if (el.btnCloseRightPanel) {
     el.btnCloseRightPanel.addEventListener('click', () => {
+      document.body.classList.remove('wave-rp-open');
       state.isRightPanelOpen = false;
       if (el.rightPanel) el.rightPanel.classList.add('hidden');
       if (el.btnToggleLyricsPanel) el.btnToggleLyricsPanel.classList.remove('active');
@@ -17880,9 +17904,16 @@ function bindCoverHoldZoom(wrapEl) {
 
   if (el.btnToggleFav) {
     el.btnToggleFav.addEventListener('click', () => {
-      if (state.currentTrack) toggleFavoriteTrack(state.currentTrack);
+      if (!state.currentTrack) return;
+      // during My Vibe a like also tunes the stream, the same as the like on the My Vibe page
+      if (state.myWaveActive && typeof window.jeemWaveLike === 'function') window.jeemWaveLike();
+      else toggleFavoriteTrack(state.currentTrack);
     });
   }
+  const btnPlaybarDislike = document.getElementById('btn-toggle-dislike');
+  if (btnPlaybarDislike) btnPlaybarDislike.addEventListener('click', () => {
+    if (state.myWaveActive && typeof window.jeemWaveDislike === 'function') window.jeemWaveDislike();
+  });
 
   const btnLyricsLike = document.getElementById('btn-lyrics-like');
   if (btnLyricsLike) btnLyricsLike.addEventListener('click', () => {
@@ -17892,6 +17923,24 @@ function bindCoverHoldZoom(wrapEl) {
     else toggleFavoriteTrack(state.currentTrack);
     syncLyricsLikeButtons();
   });
+  const btnTvkKaraoke = document.getElementById('btn-tvk-karaoke-mode');
+  const syncTvkKaraokeButton = () => {
+    if (!btnTvkKaraoke) return;
+    const on = state.lyricsMode === 'word' && getAdv('karaoke_words', true);
+    btnTvkKaraoke.classList.toggle('off', !on);
+    btnTvkKaraoke.title = on ? 'Karaoke: on' : 'Karaoke: off (plain text)';
+  };
+  window.syncTvkKaraokeButton = syncTvkKaraokeButton;
+  if (btnTvkKaraoke) btnTvkKaraoke.addEventListener('click', () => {
+    const wasOn = state.lyricsMode === 'word' && getAdv('karaoke_words', true);
+    state.lyricsMode = wasOn ? 'line' : 'word';
+    if (state.lyricsMode === 'word' && !getAdv('karaoke_words', true)) setAdv('karaoke_words', true);
+    if (typeof updateLyricsModeButton === 'function') updateLyricsModeButton();
+    renderLyricsView();
+    syncTvkKaraokeButton();
+    if (el.nativeAudio) updateSyncedLyricsHighlight(el.nativeAudio.currentTime || 0);
+  });
+  syncTvkKaraokeButton();
   const btnTvkLike = document.getElementById('btn-tvk-like');
   if (btnTvkLike) btnTvkLike.addEventListener('click', () => {
     if (!state.currentTrack) return;
@@ -27232,7 +27281,7 @@ function bindCoverHoldZoom(wrapEl) {
     const entry = { ts: Date.now(), tracks: null };
     entry.promise = Promise.resolve().then(producer).then(tracks => {
       entry.tracks = Array.isArray(tracks) ? tracks : [];
-      if (entry.tracks.length) prepareStreams(entry.tracks.slice(0, 3));
+      if (entry.tracks.length) prepareStreams(entry.tracks.slice(0, 1));
       return entry.tracks;
     }).catch(() => { entry.tracks = []; return []; });
     waveScenarios.set(key, entry);
@@ -27264,7 +27313,7 @@ function bindCoverHoldZoom(wrapEl) {
     wavePrewarmTimer = setTimeout(() => {
       const cur = state.currentTrack;
       if (!state.myWaveActive || !cur) return;
-      prepareStreams((state.queue || []).slice((state.queueIndex || 0) + 1, (state.queueIndex || 0) + 4));
+      prepareStreams((state.queue || []).slice((state.queueIndex || 0) + 1, (state.queueIndex || 0) + 2));
       waveScenario('dislike:' + waveTrackId(cur), () =>
         fetchWaveTracks(12, { extraAvoid: waveDislikeAvoid(cur) }).then(tr => dropArtistTracks(tr, cur.artist)));
     }, 2500);
