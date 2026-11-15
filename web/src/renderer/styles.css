@@ -2549,7 +2549,7 @@ body.lyrics-fullscreen-only #right-panel:not(.has-credits) .right-panel-artwork-
 body.lyrics-fullscreen-only #right-panel .lyrics-section {
   display: none !important;
 }
-body.lyrics-fullscreen-only #right-panel :is(#btn-add-custom-lyrics, #btn-sync-lyrics, #btn-translate-lyrics, #btn-tv-karaoke, #btn-lyrics-mode, #btn-close-right-panel) {
+body.lyrics-fullscreen-only #right-panel :is(#btn-add-custom-lyrics, #btn-sync-lyrics, #btn-translate-lyrics, #btn-tv-karaoke, #btn-lyrics-mode, #btn-close-right-panel, #btn-lyrics-like) {
   display: inline-flex !important;
 }
 
@@ -14848,7 +14848,20 @@ body:not(.mini) .titlebar-controls .titlebar-btn.close-btn {
 #sp-made-sec { display: none !important; }
 
 /* ---------- My Vibe ---------- */
-#view-wave { padding-bottom: 40px; }
+/* My Vibe fills the whole page: the blurred cover of the playing track is the banner */
+.main-content:has(#view-wave.active) { padding: 0 !important; overflow: hidden !important; }
+#view-wave.active { position: relative; height: 100%; min-height: 420px; padding: 0; }
+#view-wave .wave-stage { position: absolute; inset: 0; min-height: 0; border-radius: inherit; }
+.wave-cover-bg { position: absolute; inset: -60px; background-size: cover; background-position: center; filter: blur(46px) saturate(150%) brightness(.8); opacity: 0; transform: scale(1.05); transition: opacity .9s ease, background-image .9s ease; }
+.wave-cover-bg.on { opacity: .95; }
+#view-wave .wave-stage::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.18), rgba(0,0,0,.38)); pointer-events: none; }
+#view-wave .wave-center { z-index: 2; }
+#view-wave .wave-settings { position: absolute; left: 18px; right: 18px; bottom: 18px; margin: 0; max-height: 66%; overflow-y: auto; z-index: 3; background: rgba(18, 18, 22, .74); backdrop-filter: blur(22px) saturate(140%); color: #fff; box-shadow: 0 18px 50px rgba(0,0,0,.45); }
+#view-wave .wave-settings .wave-chip, #view-wave .wave-settings .wave-select, #view-wave .wave-settings .wave-input { background: rgba(255,255,255,.12); color: #fff; }
+#view-wave .wave-settings .wave-chip.active { background: #fff; color: #111; }
+#view-wave .wave-settings .wave-hint { color: rgba(255,255,255,.65); }
+#view-wave .wave-settings .wave-hint a { color: #ffd9a0; }
+#view-wave .wave-settings .wave-select option { color: #111; }
 .wave-stage { position: relative; min-height: 420px; border-radius: 28px; overflow: hidden; display: flex; align-items: center; justify-content: center; background: var(--md-sys-color-surface-container-low, #141416); }
 .wave-blob { position: absolute; inset: 0; filter: blur(60px) saturate(140%); opacity: .75; }
 .wave-blob span { position: absolute; width: 46%; aspect-ratio: 1; border-radius: 50%; animation: wave-drift 16s ease-in-out infinite alternate; animation-play-state: paused; }
@@ -14880,6 +14893,11 @@ body:not(.mini) .titlebar-controls .titlebar-btn.close-btn {
 .wave-chip:hover { filter: brightness(1.15); }
 .wave-select { height: 42px; min-width: 240px; max-width: 100%; padding: 0 14px; border-radius: 14px; border: 0; cursor: pointer; font: inherit; font-weight: 600; font-size: calc(13.5px * var(--font-scale, 1)); color: var(--md-sys-color-on-surface); background: var(--md-sys-color-surface-container-highest, #2a2a2e); }
 .wave-select:focus-visible { outline: 2px solid var(--md-sys-color-primary); outline-offset: 2px; }
+.wave-ai-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.wave-input { height: 42px; flex: 1 1 220px; min-width: 180px; padding: 0 14px; border-radius: 14px; border: 0; font: inherit; font-size: calc(13.5px * var(--font-scale, 1)); color: var(--md-sys-color-on-surface); background: var(--md-sys-color-surface-container-highest, #2a2a2e); }
+.wave-input:focus-visible { outline: 2px solid var(--md-sys-color-primary); outline-offset: 2px; }
+.wave-hint a { color: var(--md-sys-color-primary); text-decoration: none; }
+.wave-hint a:hover { text-decoration: underline; }
 .wave-hint { margin-top: 8px; font-size: calc(12.5px * var(--font-scale, 1)); color: var(--md-sys-color-on-surface-variant, rgba(255,255,255,.6)); }
 .wave-chip.active { background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary, #000); }
 .wave-reset { align-self: flex-start; }
@@ -14927,3 +14945,40 @@ body.mini #playbar-artwork-wrapper::after { display: none; }
 @media (prefers-reduced-motion: reduce) {
   #playbar-artwork-wrapper .m3c-wrap, #playbar-artwork-wrapper .artwork-fallback, #playbar-artwork-wrapper::after { transition: none; }
 }
+
+/* YouTube is a separate, free search: it sits apart from the music sources */
+.platform-sep { display: inline-block; width: 1px; align-self: stretch; margin: 6px 4px; background: var(--md-sys-color-outline-variant, rgba(255,255,255,.18)); flex: 0 0 1px; }
+body.compact-engine-btns .platform-sep { display: none; }
+.yt-warning-card { max-width: 460px; }
+.yt-warning-card p { margin: 8px 0 14px; color: var(--md-sys-color-on-surface-variant); font-size: calc(13.5px * var(--font-scale, 1)); line-height: 1.5; }
+.yt-warning-check { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; cursor: pointer; user-select: none; font-size: calc(13.5px * var(--font-scale, 1)); }
+.yt-warning-check input { width: 18px; height: 18px; accent-color: var(--md-sys-color-primary); cursor: pointer; }
+
+/* like and dislike inside the lyrics view */
+body.lyrics-fullscreen-only #right-panel #btn-lyrics-dislike:not(.hidden) { display: inline-flex !important; }
+.lyrics-like-btn.hidden { display: none !important; }
+.lyrics-like-btn.active { color: var(--md-sys-color-primary); }
+.lyrics-like-btn.active svg { fill: currentColor; }
+
+.keycap-plus { opacity: .55; font-size: .9em; }
+
+/* About: a banner in the colours of the Jeem icon */
+.jeem-hero-banner--brand { background: #101315; height: 168px; }
+.jeem-hero-banner--brand .jb-blob { position: absolute; border-radius: 50%; filter: blur(34px); opacity: .95; }
+.jeem-hero-banner--brand .jb1 { width: 62%; aspect-ratio: 1; left: -12%; top: -70%; background: #7ee0c0; animation: jb-drift 14s ease-in-out infinite alternate; }
+.jeem-hero-banner--brand .jb2 { width: 58%; aspect-ratio: 1; right: -10%; bottom: -78%; background: #f6b48a; animation: jb-drift 18s ease-in-out infinite alternate-reverse; }
+.jeem-hero-banner--brand .jb-wave { position: absolute; inset: 0; background: radial-gradient(60% 90% at 50% 50%, rgba(255,255,255,.10), transparent 70%); }
+.jeem-hero-banner--brand .jb-logo { position: relative; z-index: 2; width: 96px; height: 96px; filter: drop-shadow(0 12px 28px rgba(0,0,0,.45)); transition: transform .35s cubic-bezier(.34,1.56,.64,1); }
+.jeem-hero-banner--brand:hover .jb-logo { transform: scale(1.06) rotate(-3deg); }
+@keyframes jb-drift { from { transform: translate(0, 0) scale(1); } to { transform: translate(8%, 10%) scale(1.15); } }
+body.perf .jeem-hero-banner--brand .jb-blob { animation: none; }
+.jb-author { position: absolute; z-index: 3; right: 14px; bottom: 12px; display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px; border-radius: 999px; background: rgba(10,12,14,.55); backdrop-filter: blur(10px); color: #fff; text-decoration: none; font-weight: 700; font-size: calc(12.5px * var(--font-scale, 1)); transition: background .2s, transform .2s; }
+.jb-author:hover { background: rgba(10,12,14,.8); transform: translateY(-1px); }
+.jb-author img { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; }
+.jb-author span { padding-left: 2px; }
+
+#btn-tvk-like { right: 236px !important; }
+#btn-tvk-dislike { right: 288px !important; }
+#btn-tvk-dislike.hidden { display: none !important; }
+#btn-tvk-like.active { background: rgba(255, 255, 255, 0.92); color: #101315; }
+#btn-tvk-like.active svg { fill: currentColor; }

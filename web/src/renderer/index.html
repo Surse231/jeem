@@ -387,15 +387,9 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
 
     <div class="platform-switch-container">
       <div class="platform-pill-switch">
-        <button class="platform-btn" data-platform="all" id="platform-all" title="All sources">
+        <button class="platform-btn" data-platform="all" id="platform-all" title="All platforms (YouTube Music and SoundCloud)">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
-          <span data-i18n>All</span>
-        </button>
-        <button class="platform-btn" data-platform="youtube" id="platform-yt" title="YouTube">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M21.58 7.19c-.23-.86-.91-1.54-1.77-1.77C18.25 5 12 5 12 5s-6.25 0-7.81.42c-.86.23-1.54.91-1.77 1.77C2 8.75 2 12 2 12s0 3.25.42 4.81c.23.86.91 1.54 1.77 1.77C5.75 19 12 19 12 19s6.25 0 7.81-.42c.86-.23 1.54-.91 1.77-1.77C22 15.25 22 12 22 12s0-3.25-.42-4.81zM10 15V9l5.2 3L10 15z"/>
-          </svg>
-          <span>YouTube</span>
+          <span data-i18n>All platforms</span>
         </button>
         <button class="platform-btn active" data-platform="ytmusic" id="platform-ytm" title="YouTube Music">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
@@ -408,6 +402,13 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
             <path d="M11.5 14.5c0 .28-.22.5-.5.5s-.5-.22-.5-.5v-4c0-.28.22-.5.5-.5s.5.22.5.5v4zm-2 0c0 .28-.22.5-.5.5s-.5-.22-.5-.5v-3c0-.28.22-.5.5-.5s.5.22.5.5v3zm-2 0c0 .28-.22.5-.5.5s-.5-.22-.5-.5v-2c0-.28.22-.5.5-.5s.5.22.5.5v2zm-2 0c0 .28-.22.5-.5.5s-.5-.22-.5-.5v-1c0-.28.22-.5.5-.5s.5.22.5.5v1zm14.5-.5c0 1.93-1.57 3.5-3.5 3.5H13V9.1c.7-.6 1.6-1.1 2.6-1.1 2.2 0 4.1 1.6 4.4 3.8.3-.2.7-.3 1-.3 1.4 0 2.5 1.1 2.5 2.5z"/>
           </svg>
           <span>SoundCloud</span>
+        </button>
+        <span class="platform-sep" aria-hidden="true"></span>
+        <button class="platform-btn" data-platform="youtube" id="platform-yt" title="YouTube: search the whole of YouTube">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M21.58 7.19c-.23-.86-.91-1.54-1.77-1.77C18.25 5 12 5 12 5s-6.25 0-7.81.42c-.86.23-1.54.91-1.77 1.77C2 8.75 2 12 2 12s0 3.25.42 4.81c.23.86.91 1.54 1.77 1.77C5.75 19 12 19 12 19s6.25 0 7.81-.42c.86-.23 1.54-.91 1.77-1.77C22 15.25 22 12 22 12s0-3.25-.42-4.81zM10 15V9l5.2 3L10 15z"/>
+          </svg>
+          <span>YouTube</span>
         </button>
       </div>
     </div>
@@ -862,6 +863,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
 
       <section class="content-view" id="view-wave">
         <div class="wave-stage">
+          <div class="wave-cover-bg" id="wave-cover-bg" aria-hidden="true"></div>
           <div class="wave-blob" aria-hidden="true"><span></span><span></span><span></span></div>
           <div class="wave-center">
             <h1 class="wave-title" data-i18n>My Vibe</h1>
@@ -1176,14 +1178,6 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                 </svg>
                 <span data-i18n>About</span>
               </button>
-              <button class="settings-nav-btn" data-cat="custom-themes">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5"/><circle cx="17.5" cy="10.5" r=".5"/><circle cx="8.5" cy="7.5" r=".5"/><circle cx="6.5" cy="12.5" r=".5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.9 0 1.7-.8 1.7-1.7 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.9.8-1.7 1.7-1.7H16c3.3 0 6-2.7 6-6 0-4.9-4.5-8.4-10-8.4z"/></svg>
-                <span data-i18n>Custom themes</span>
-              </button>
-              <button class="settings-nav-btn" data-cat="plugins">
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z"/></svg>
-                <span data-i18n>Plugins</span>
-              </button>
               <div style="flex: 1 1 auto; min-height: 12px;"></div>
               <button class="settings-nav-btn settings-account-nav-btn" data-cat="account" id="settings-nav-account" type="button">
                 <img id="settings-nav-avatar" class="settings-nav-avatar" src="../../assets/icon.png" alt="" draggable="false" />
@@ -1384,21 +1378,11 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                   <svg class="m3-dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </button>
                 <div class="m3-dropdown-menu" id="engine-api-menu">
-                  <button class="m3-dropdown-option" data-value="all" type="button">All sources</button>
-                  <button class="m3-dropdown-option" data-value="youtube" type="button">YouTube</button>
+                  <button class="m3-dropdown-option" data-value="all" type="button">All platforms</button>
                   <button class="m3-dropdown-option selected" data-value="ytmusic" type="button">YouTube Music</button>
                   <button class="m3-dropdown-option" data-value="soundcloud" type="button">SoundCloud</button>
+                  <button class="m3-dropdown-option" data-value="youtube" type="button">YouTube (everything)</button>
                 </div>
-              </div>
-            </div>
-
-            <div class="setting-item" id="setting-show-yt-platform">
-              <div class="setting-item-top" style="align-items: center;">
-                <div style="display: flex; flex-direction: column; gap: 2px;">
-                  <span class="setting-name" data-i18n>Show YouTube platform</span>
-                  <span class="setting-hint" data-i18n>Not recommended: regular YouTube includes non-music videos and loads slower than YouTube Music</span>
-                </div>
-                <button class="effect-switch-btn" id="btn-show-yt-platform" type="button"><span class="thumb"></span></button>
               </div>
             </div>
 
@@ -1625,7 +1609,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                 </div>
               </div>
 
-              <div class="settings-section" data-cat="custom-themes">
+              <div class="settings-section" data-cat="custom-themes" hidden style="display:none">
                 <div class="ct-head">
                   <div style="display: flex; flex-direction: column; gap: 4px;">
                     <div class="settings-section-title">Custom themes</div>
@@ -1640,7 +1624,7 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                 <div class="ct-list m3-group" id="custom-themes-list"></div>
               </div>
 
-              <div class="settings-section" data-cat="plugins">
+              <div class="settings-section" data-cat="plugins" hidden style="display:none">
                 <div class="ct-head"><div><div class="settings-section-title">Plugins</div><div class="setting-hint"><span class="plugins-warn">Plugins are JavaScript files with full access to Jeem.</span> Only add plugins you trust. They live in the plugins folder: delete a file and the plugin is gone. Ctrl+Shift+R turns every plugin off.</div></div><div class="ct-actions"><button class="btn-outline-pill" id="btn-plugins-folder">Open folder</button><button class="btn-outline-pill" id="btn-plugins-reload">Reload list</button><button class="btn-pill-primary" id="btn-add-plugin">Add</button></div></div>
                 <div class="ct-list m3-group" id="plugins-list"></div>
               </div>
@@ -2149,21 +2133,6 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
               </div>
             </div>
 
-            <div class="setting-item" id="setting-audio-output-row">
-              <div class="setting-item-top" style="align-items: center;">
-                <div style="display: flex; flex-direction: column; gap: 2px;">
-                  <span class="setting-name" data-i18n>Audio output device</span>
-                  <span class="setting-hint" data-i18n>Route playback to a specific speaker, headset, or audio channel</span>
-                </div>
-                <div class="m3-dropdown" id="audio-output-dropdown" style="width: 250px; flex-shrink: 0;">
-                  <button class="m3-dropdown-trigger" id="audio-output-trigger" type="button">
-                    <span class="m3-dropdown-label" id="audio-output-label">System default</span>
-                    <svg class="m3-dropdown-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                  </button>
-                  <div class="m3-dropdown-menu" id="audio-output-menu"></div>
-                </div>
-              </div>
-            </div>
 
             <div class="setting-item">
               <div class="setting-item-top">
@@ -2174,17 +2143,6 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
               <div class="setting-hints"><span>Off</span><span>6s</span><span>12s</span></div>
             </div>
 
-            <div class="setting-item">
-              <div class="setting-item-top">
-                <div style="display: flex; flex-direction: column; gap: 2px;">
-                  <span class="setting-name">Stream timeout</span>
-                  <span style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);">How long to wait for a track to start loading before giving up</span>
-                </div>
-                <span class="setting-value" id="val-stream-timeout">12s</span>
-              </div>
-              <input type="range" class="pill-range" id="slider-stream-timeout" min="5" max="30" step="1" value="12">
-              <div class="setting-hints"><span>5s</span><span>17s</span><span>30s</span></div>
-            </div>
 
             <div class="setting-item"><div class="setting-item-top" style="align-items: center;"><div style="display: flex; flex-direction: column; gap: 2px;"><span class="setting-name" data-i18n>Show lyrics only in fullscreen mode</span><span class="setting-hint" data-i18n>Hide lyrics in the right Now Playing panel and open them in fullscreen from the bottom bar</span></div><button type="button" class="effect-switch-btn active" id="btn-lyrics-fullscreen-only"><span class="thumb"></span></button></div></div>
 
@@ -2264,27 +2222,6 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
               <div class="setting-hints"><span>0.5x (Slow)</span><span>1.0x (Normal)</span><span>2.5x (Fast)</span></div>
             </div>
 
-            <div class="setting-item" id="setting-lyrics-source-row">
-              <div class="setting-item-top">
-                <div style="display: flex; flex-direction: column; gap: 2px;">
-                  <span class="setting-name">Lyrics source</span>
-                  <span style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);">Preferred lyrics provider with automatic fallback</span>
-                </div>
-              </div>
-              <div class="m3-dropdown" id="lyrics-source-dropdown">
-                <button class="m3-dropdown-trigger" id="lyrics-source-trigger" type="button">
-                  <span id="lyrics-source-label">LRCLIB</span>
-                  <svg class="m3-dropdown-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                </button>
-                <div class="m3-dropdown-menu" id="lyrics-source-menu">
-                  <button class="m3-dropdown-option selected" data-value="lrclib" type="button">LRCLIB</button>
-                  <button class="m3-dropdown-option" data-value="musixmatch" type="button">Musixmatch</button>
-                  <button class="m3-dropdown-option" data-value="kugou" type="button">Kugou LRC</button>
-                  <button class="m3-dropdown-option" data-value="netease" type="button">NetEase</button>
-                  <button class="m3-dropdown-option" data-value="genius" type="button">Genius</button>
-                </div>
-              </div>
-            </div>
 
             <div class="setting-item" id="setting-word-source-row">
               <div class="setting-item-top">
@@ -2647,7 +2584,6 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
               <div class="adv-collapsible-inner">
                 <div class="adv-items-list">
                   <div class="m3-group">
-                    <div class="setting-item hidden" id="setting-default-studio" style="display: none !important;"><div class="setting-item-top" style="align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;"><div style="display: flex; flex-direction: column; gap: 2px;"><span class="setting-name">Default Settings Studio</span><span class="setting-hint">Save your current visual, theme, layout & audio settings as the default for all new users, or preview as a new user</span></div><div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;"><button type="button" class="btn-pill-primary" id="btn-save-as-defaults" style="height: 32px; padding: 0 14px; font-size: 12.5px;">Save current as Defaults</button><button type="button" class="btn-outline-pill" id="btn-test-new-user" style="height: 32px; padding: 0 14px; font-size: 12.5px;">Preview as New User</button><button type="button" class="btn-outline-pill hidden" id="btn-restore-owner-profile" style="height: 32px; padding: 0 14px; font-size: 12.5px; color: var(--md-sys-color-primary);">Restore My Profile</button></div></div></div>
                     <div class="setting-item">
                       <div class="setting-item-top" style="align-items: center;">
                         <div style="display: flex; flex-direction: column; gap: 2px;">
@@ -2655,52 +2591,6 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                           <span class="setting-hint" data-i18n>Use the compact floating sidebar and floating bottom player bar</span>
                         </div>
                         <button class="effect-switch-btn" id="btn-classic-sidebar" data-adv="classic_sidebar" type="button"><span class="thumb"></span></button>
-                      </div>
-                    </div>
-                    <div class="setting-item" id="setting-desktop-shortcut">
-                      <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
-                        <div style="display: flex; flex-direction: column; gap: 2px;">
-                          <span class="setting-name">Create desktop & app menu shortcut</span>
-                          <span class="setting-hint">Add Jeem shortcut to your desktop and system applications menu</span>
-                        </div>
-                        <button type="button" class="btn-outline-pill" id="btn-create-shortcut" style="height: 32px; padding: 0 14px; font-size: 13px;">Create shortcut</button>
-                      </div>
-                    </div>
-                    <div class="setting-item" id="setting-yt-account">
-                      <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
-                        <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
-                          <div style="width: 34px; height: 34px; border-radius: 10px; background: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
-                            <svg viewBox="0 0 28 20" width="20" height="14">
-                              <path d="M27.4 3.1a3.5 3.5 0 0 0-2.5-2.5C22.7 0 14 0 14 0S5.3 0 3.1.6A3.5 3.5 0 0 0 .6 3.1C0 5.3 0 10 0 10s0 4.7.6 6.9a3.5 3.5 0 0 0 2.5 2.5C5.3 20 14 20 14 20s8.7 0 10.9-.6a3.5 3.5 0 0 0 2.5-2.5C28 14.7 28 10 28 10s0-4.7-.6-6.9z" fill="#FF0033"/>
-                              <polygon points="11.2,14.3 18.5,10 11.2,5.7" fill="#FFFFFF"/>
-                            </svg>
-                          </div>
-                          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
-                            <span class="setting-name" data-i18n>YouTube Account</span>
-                            <span class="setting-hint" id="adv-yt-auth-status" data-i18n>Sign in to import your YouTube library</span>
-                          </div>
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
-                          <button type="button" class="btn-pill-primary" id="btn-adv-yt-login" style="height: 32px; padding: 0 16px; font-size: 12.5px;" data-i18n>Sign in</button>
-                          <button type="button" class="btn-outline-pill hidden" id="btn-adv-yt-logout" style="height: 32px; padding: 0 14px; font-size: 12.5px;" data-i18n>Sign out</button>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="setting-item" id="setting-proxy-manager">
-                      <div class="setting-item-top" style="align-items: center; justify-content: space-between;">
-                        <div style="display: flex; flex-direction: column; gap: 2px;">
-                          <span class="setting-name" data-i18n>In-app proxy (YouTube / SoundCloud bypass)</span>
-                          <span class="setting-hint" data-i18n>Route Jeem audio and stream extraction through a proxy without slowing down your whole system</span>
-                        </div>
-                        <button class="effect-switch-btn" id="btn-proxy-enable" type="button" title="Enable in-app proxy"><span class="thumb"></span></button>
-                      </div>
-                      <div class="proxy-manager-box" id="proxy-manager-box" style="margin-top: 12px; display: flex; flex-direction: column; gap: 10px;">
-                        <div style="display: flex; gap: 8px; align-items: center;">
-                          <input type="text" id="proxy-input-url" class="pill-text-input" placeholder="socks5://127.0.0.1:10808 or http://user:pass@ip:port" style="flex: 1; height: 38px; font-size: 13px;" autocomplete="off">
-                          <button type="button" class="btn-pill-primary" id="btn-proxy-add" title="Add proxy" style="height: 38px; min-width: 42px; padding: 0 14px; font-size: 18px; font-weight: 600;">+</button>
-                          <button type="button" class="btn-outline-pill" id="btn-proxy-test" title="Test active proxy" style="height: 38px; padding: 0 14px; font-size: 12px;" data-i18n>Test</button>
-                        </div>
-                        <div id="proxy-list-container" class="proxy-list-container"></div>
                       </div>
                     </div>
 
@@ -2756,15 +2646,6 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
                     </div>
                   </div>
 
-                  <div class="setting-item">
-                    <div class="setting-item-top" style="align-items: center;">
-                      <div style="display: flex; flex-direction: column; gap: 2px;">
-                        <span class="setting-name">Allow multiple instances</span>
-                        <span style="font-size: calc(12px * var(--font-scale, 1)); color: var(--md-sys-color-outline);">For testing: lets you start a second Jeem window. Applies after restart. The second window uses its own clean profile.</span>
-                      </div>
-                      <button class="effect-switch-btn" id="btn-multi-instance"><span class="thumb"></span></button>
-                    </div>
-                  </div>
 
                   <div class="setting-item">
                     <div class="setting-item-top" style="align-items: center;">
@@ -3004,15 +2885,15 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
           <div class="settings-section" id="settings-section-about" data-cat="about">
             <span class="settings-section-title">About</span>
             <div class="jeem-hero-banner-wrap">
-              <div class="jeem-hero-banner">
-                <div class="jeem-hero-floats">
-                  <span class="jeem-float-logo f1"></span>
-                  <span class="jeem-float-logo f2"></span>
-                  <span class="jeem-float-logo f3"></span>
-                </div>
-                <div class="jeem-hero-cookie">
-                  <span class="jeem-hero-logo-main"></span>
-                </div>
+              <div class="jeem-hero-banner jeem-hero-banner--brand">
+                <span class="jb-blob jb1"></span>
+                <span class="jb-blob jb2"></span>
+                <span class="jb-wave"></span>
+                <img class="jb-logo" src="../../assets/jeem.svg" alt="Jeem" draggable="false">
+                <a href="#" class="jb-author" id="btn-about-author" title="github.com/Surse231" aria-label="Open the author on GitHub">
+                  <img src="https://github.com/Surse231.png?size=72" alt="" draggable="false" onerror="this.style.display='none'">
+                  <span>Surse</span>
+                </a>
               </div>
               <span class="jeem-hero-title">Jeem</span>
             </div>
@@ -3075,6 +2956,12 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
       <div class="right-panel-banner" id="right-panel-banner"><div class="banner-image"></div></div>
       <div class="right-panel-header">
         <div class="right-panel-header-actions">
+          <button class="lyrics-action-btn lyrics-like-btn hidden" id="btn-lyrics-dislike" title="Not for me" aria-label="Not for me">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"></path></svg>
+          </button>
+          <button class="lyrics-action-btn lyrics-like-btn" id="btn-lyrics-like" title="Like" aria-label="Like">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+          </button>
           <button class="lyrics-action-btn" id="btn-add-custom-lyrics" title="Edit lyrics" aria-label="Edit lyrics">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
             <span>Edit</span>
@@ -4234,16 +4121,20 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
       </div>
       <div style="overflow-y: auto; display: flex; flex-direction: column; gap: 8px; font-size: calc(13px * var(--font-scale, 1)); padding-right: 4px;">
         <div style="display: flex; justify-content: space-between; align-items: center;"><span>Play / Pause</span><div style="display: flex; align-items: center; gap: 6px;"><span class="keycap wide">Space</span></div></div>
-        <div style="display: flex; justify-content: space-between; align-items: center;"><span>Next / Previous</span><div style="display: flex; align-items: center; gap: 6px;"><span class="keycap wide">Ctrl</span><span style="color: var(--md-sys-color-on-surface-variant);">+</span><span class="keycap">→</span><span style="color: var(--md-sys-color-on-surface-variant);">/</span><span class="keycap">←</span></div></div>
-        <div style="display: flex; justify-content: space-between; align-items: center;"><span>Seek ±5s</span><div style="display: flex; align-items: center; gap: 6px;"><span class="keycap wide">Shift</span><span style="color: var(--md-sys-color-on-surface-variant);">+</span><span class="keycap">→</span><span style="color: var(--md-sys-color-on-surface-variant);">/</span><span class="keycap">←</span></div></div>
-        <div style="display: flex; justify-content: space-between; align-items: center;"><span>Volume ±5%</span><div style="display: flex; align-items: center; gap: 6px;"><span class="keycap wide">Ctrl</span><span style="color: var(--md-sys-color-on-surface-variant);">+</span><span class="keycap">↑</span><span style="color: var(--md-sys-color-on-surface-variant);">/</span><span class="keycap">↓</span></div></div>
+        <div style="display: flex; justify-content: space-between; align-items: center;"><span>Next / Previous</span><div style="display: flex; align-items: center; gap: 6px;"><span class="keycap wide">Ctrl</span><span class="keycap-plus">+</span><span class="keycap">→</span><span class="keycap-plus">/</span><span class="keycap wide">Ctrl</span><span class="keycap-plus">+</span><span class="keycap">←</span></div></div>
+        <div style="display: flex; justify-content: space-between; align-items: center;"><span>Seek ±5s</span><div style="display: flex; align-items: center; gap: 6px;"><span class="keycap wide">Shift</span><span class="keycap-plus">+</span><span class="keycap">→</span><span class="keycap-plus">/</span><span class="keycap wide">Shift</span><span class="keycap-plus">+</span><span class="keycap">←</span></div></div>
+        <div style="display: flex; justify-content: space-between; align-items: center;"><span>Volume ±5%</span><div style="display: flex; align-items: center; gap: 6px;"><span class="keycap wide">Ctrl</span><span class="keycap-plus">+</span><span class="keycap">↑</span><span class="keycap-plus">/</span><span class="keycap wide">Ctrl</span><span class="keycap-plus">+</span><span class="keycap">↓</span></div></div>
         <div style="display: flex; justify-content: space-between; align-items: center;"><span>Mute / Unmute</span><div style="display: flex; align-items: center; gap: 6px;"><span class="keycap">M</span></div></div>
+        <div style="display: flex; justify-content: space-between; align-items: center;"><span>Like the track</span><div style="display: flex; align-items: center; gap: 6px;"><span class="keycap wide">Ctrl</span><span class="keycap-plus">+</span><span class="keycap">L</span></div></div>
+        <div style="display: flex; justify-content: space-between; align-items: center;"><span>Not for me (My Vibe)</span><div style="display: flex; align-items: center; gap: 6px;"><span class="keycap wide">Ctrl</span><span class="keycap-plus">+</span><span class="keycap wide">Shift</span><span class="keycap-plus">+</span><span class="keycap">L</span></div></div>
         <div style="display: flex; justify-content: space-between; align-items: center;"><span>Shuffle</span><div style="display: flex; align-items: center; gap: 6px;"><span class="keycap">H</span></div></div>
         <div style="display: flex; justify-content: space-between; align-items: center;"><span>Repeat</span><div style="display: flex; align-items: center; gap: 6px;"><span class="keycap">R</span></div></div>
         <div style="display: flex; justify-content: space-between; align-items: center;"><span>Lyrics</span><div style="display: flex; align-items: center; gap: 6px;"><span class="keycap">L</span></div></div>
+        <div style="display: flex; justify-content: space-between; align-items: center;"><span>Queue</span><div style="display: flex; align-items: center; gap: 6px;"><span class="keycap">Q</span></div></div>
         <div style="display: flex; justify-content: space-between; align-items: center;"><span>TV Karaoke</span><div style="display: flex; align-items: center; gap: 6px;"><span class="keycap">F</span></div></div>
         <div style="display: flex; justify-content: space-between; align-items: center;"><span>Mini player</span><div style="display: flex; align-items: center; gap: 6px;"><span class="keycap">P</span></div></div>
-        <div style="display: flex; justify-content: space-between; align-items: center;"><span>Search</span><div style="display: flex; align-items: center; gap: 6px;"><span class="keycap wide">Ctrl</span><span style="color: var(--md-sys-color-on-surface-variant);">+</span><span class="keycap">K</span></div></div>
+        <div style="display: flex; justify-content: space-between; align-items: center;"><span>Search</span><div style="display: flex; align-items: center; gap: 6px;"><span class="keycap wide">Ctrl</span><span class="keycap-plus">+</span><span class="keycap">K</span></div></div>
+        <div style="display: flex; justify-content: space-between; align-items: center;"><span>Back / Forward (mouse side buttons)</span><div style="display: flex; align-items: center; gap: 6px;"><span class="keycap wide">Back</span><span class="keycap-plus">/</span><span class="keycap wide">Forward</span></div></div>
         <div style="display: flex; justify-content: space-between; align-items: center;"><span>Close / Blur</span><div style="display: flex; align-items: center; gap: 6px;"><span class="keycap wide">Esc</span></div></div>
       </div>
     </div>
@@ -4469,6 +4360,12 @@ body:not(.home-next-to-search) .bs-home-circle { display: none !important; }
       <div class="tv-bg-layer active" id="tv-bg-layer-a"></div>
       <div class="tv-bg-layer" id="tv-bg-layer-b"></div>
     </div>
+    <button class="tv-karaoke-close hidden" id="btn-tvk-dislike" title="Not for me" aria-label="Not for me" style="right: 288px;">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"></path></svg>
+    </button>
+    <button class="tv-karaoke-close" id="btn-tvk-like" title="Like" aria-label="Like" style="right: 236px;">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+    </button>
     <button class="tv-karaoke-close" id="btn-tvk-edit-lyrics" title="Edit lyrics" aria-label="Edit lyrics" style="right: 184px;">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M12 20h9"></path>

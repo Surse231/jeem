@@ -254,6 +254,8 @@ pub async fn search(ctx: &Arc<Ctx>, query: &str, platform: &str, limit: usize, o
                 merged
             }
         }
+    } else if platform == "youtube" {
+        search_pool(ctx, "youtube-raw", q).await
     } else {
         search_pool(ctx, platform, q).await
     };
@@ -295,6 +297,8 @@ async fn search_pool(ctx: &Arc<Ctx>, platform: &str, q: &str) -> Vec<Value> {
     }
     let mut pool = match platform {
         "soundcloud" => ytdlp_search(ctx, "scsearch", q, 30, "soundcloud").await,
+        // the free search of the whole of YouTube: nothing is filtered out
+        "youtube-raw" => ytdlp_search(ctx, "ytsearch", q, 40, "youtube").await,
         "youtube" => ytdlp_search(ctx, "ytsearch", q, 40, "youtube").await,
         _ => {
             let songs = ytm_search(ctx, q).await.unwrap_or_default();
@@ -303,7 +307,9 @@ async fn search_pool(ctx: &Arc<Ctx>, platform: &str, q: &str) -> Vec<Value> {
     };
     // SoundCloud keeps DJ sets and long tracks up to 20 minutes; YouTube music videos rarely run longer than 11.
     let max_secs = if platform == "soundcloud" { 1200.0 } else { 660.0 };
-    pool.retain(|t| !is_not_music(t, max_secs));
+    if platform != "youtube-raw" {
+        pool.retain(|t| !is_not_music(t, max_secs));
+    }
     if !pool.is_empty() {
         ctx.search_cache.lock().unwrap().insert(key, (Instant::now(), pool.clone()));
     }
@@ -531,10 +537,14 @@ fn clean_chart_title(title: &str, artist: &str) -> String {
 fn is_broadcast_upload(title: &str, artist: &str) -> bool {
     let a = artist.to_lowercase();
     let t = title.to_lowercase();
-    const CHANNELS: [&str; 16] = [
+    const CHANNELS: &[&str] = &[
         "kbs", "sbs", "mbc", "tonight show", "triple j", "mosh pit", "entertainment", "news", "tv", "show", "official channel", "late night", "live session",
-        "podcast", "episode", "trailer",
+        "podcast", "episode", "trailer", "스브스", "예능", "mnet", "zoom", "all the k pop", "music bank", "inkigayo", "show champion", "fancam", "facecam",
     ];
+    let title_junk = ["facecam", "fancam", "show champion", "inkigayo", "music bank", "full episode", "reaction"];
+    if title_junk.iter().any(|j| t.contains(j)) {
+        return true;
+    }
     CHANNELS.iter().any(|c| {
         if c.len() <= 3 {
             a.split(|ch: char| !ch.is_alphanumeric()).any(|w| w == *c)
@@ -633,6 +643,94 @@ pub async fn yt_chart(ctx: &Ctx, country: &str) -> (String, Vec<Value>) {
         ctx.search_cache.lock().unwrap().insert(key, (Instant::now(), out.clone()));
     }
     (chart_name, out)
+}
+
+/// The id of the YouTube video that plays "artist - title" (cached for a day).
+pub async fn find_video_id(ctx: &Ctx, artist: &str, title: &str) -> Option<String> {
+    let q = format!("{artist} {title}").trim().to_lowercase();
+    if q.is_empty() {
+        return None;
+    }
+    let key = format!("vid:{q}");
+    if let Some((t, v)) = ctx.search_cache.lock().unwrap().get(&key) {
+        if t.elapsed() < Duration::from_secs(24 * 3600) {
+            return v.first().map(|x| text(x.get("id")).to_string()).filter(|x| !x.is_empty());
+        }
+    }
+    let found = ytm_search(ctx, &q).await.unwrap_or_default();
+    let id = found.first().map(|x| text(x.get("id")).to_string()).unwrap_or_default();
+    ctx.search_cache.lock().unwrap().insert(key, (Instant::now(), vec![json!({ "id": id })]));
+    if id.is_empty() { None } else { Some(id) }
+}
+
+/// "Radio" of a track on YouTube Music: about 50 tracks that people play after it. Works for music of any language.
+pub async fn yt_radio(ctx: &Ctx, video_id: &str) -> Vec<Value> {
+    if video_id.is_empty() {
+        return Vec::new();
+    }
+    let key = format!("radio:{video_id}");
+    if let Some((t, v)) = ctx.search_cache.lock().unwrap().get(&key) {
+        if t.elapsed() < Duration::from_secs(30 * 60) {
+            return v.clone();
+        }
+    }
+    let body = json!({
+        "context": { "client": { "clientName": "WEB_REMIX", "clientVersion": "1.20250101.01.00", "hl": "en", "gl": "US" } },
+        "videoId": video_id, "playlistId": format!("RDAMVM{video_id}"), "isAudioOnly": true
+    });
+    let Ok(resp) = ctx
+        .client
+        .post("https://music.youtube.com/youtubei/v1/next?prettyPrint=false")
+        .header("Origin", "https://music.youtube.com")
+        .header("Referer", "https://music.youtube.com/")
+        .header("User-Agent", UA)
+        .timeout(Duration::from_secs(10))
+        .json(&body)
+        .send()
+        .await
+    else {
+        return Vec::new();
+    };
+    let Ok(root) = resp.json::<Value>().await else { return Vec::new() };
+    let mut rows = Vec::new();
+    find_all(&root, "playlistPanelVideoRenderer", &mut rows);
+    let mut out: Vec<Value> = Vec::new();
+    for r in rows {
+        let id = text(r.get("videoId"));
+        let title = text(r.pointer("/title/runs/0/text"));
+        if id.is_empty() || title.is_empty() || id == video_id {
+            continue;
+        }
+        // "Artist & Artist • 14M views • 149K likes"
+        let mut parts: Vec<String> = vec![String::new()];
+        for run in r.pointer("/longBylineText/runs").and_then(Value::as_array).into_iter().flatten() {
+            let t = text(run.get("text"));
+            if t.trim() == "\u{2022}" {
+                parts.push(String::new());
+            } else {
+                parts.last_mut().unwrap().push_str(t);
+            }
+        }
+        let artist = parts[0].trim().to_string();
+        if artist.is_empty() {
+            continue;
+        }
+        let dur = parse_duration(text(r.pointer("/lengthText/runs/0/text")));
+        if dur > 0 && (dur > 660 || dur < 40) {
+            continue;
+        }
+        let thumb = format!("https://i.ytimg.com/vi/{id}/hqdefault.jpg");
+        let mut item = track(id, title, artist.strip_suffix(" - Topic").unwrap_or(&artist), "", dur, &thumb, false);
+        item["platform"] = json!("ytmusic");
+        if let Some(v) = parts.get(1).and_then(|p| p.trim().strip_suffix(" views")) {
+            item["playsText"] = json!(v.trim());
+        }
+        out.push(item);
+    }
+    if !out.is_empty() {
+        ctx.search_cache.lock().unwrap().insert(key, (Instant::now(), out.clone()));
+    }
+    out
 }
 
 pub async fn deezer_chart(ctx: &Ctx, limit: usize) -> Vec<Value> {
@@ -848,6 +946,101 @@ pub fn custom_lyrics_path(ctx: &Ctx, title: &str, artist: &str) -> std::path::Pa
     dir.join(format!("{:016x}.lrc", h.finish()))
 }
 
+/// "Song (feat. X) - 2011 Remaster" -> "song": what two spellings of a title have in common.
+fn base_title(t: &str) -> String {
+    let mut out = String::new();
+    let mut depth = 0i32;
+    for c in t.chars() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = (depth - 1).max(0),
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    let low = out.to_lowercase();
+    let cut = [" - ", " – ", " — "].iter().filter_map(|d| low.find(d)).min().unwrap_or(low.len());
+    low[..cut].chars().filter(|c| c.is_alphanumeric()).collect()
+}
+
+/// The LRCLIB entry that is really this recording: same title, same artist and (above all) the same length, so the timing fits.
+/// Returns the text, whether it is timed and how many seconds its length differs from the track's.
+async fn lrclib_best(ctx: &Ctx, title: &str, artist: &str, dur: f64) -> Option<(String, bool, f64)> {
+    let ua = "Jeem";
+    let mut items: Vec<Value> = Vec::new();
+    let get_url = format!(
+        "https://lrclib.net/api/get?track_name={}&artist_name={}{}",
+        urlencode(title),
+        urlencode(artist),
+        if dur > 0.0 { format!("&duration={}", dur.round()) } else { String::new() }
+    );
+    let search_url = format!("https://lrclib.net/api/search?track_name={}&artist_name={}", urlencode(title), urlencode(artist));
+    let loose_url = format!("https://lrclib.net/api/search?q={}", urlencode(&format!("{artist} {title}")));
+    let (g, sr, lo) = tokio::join!(
+        async { ctx.client.get(get_url).header("User-Agent", ua).timeout(Duration::from_secs(8)).send().await.ok()?.json::<Value>().await.ok() },
+        async { ctx.client.get(search_url).header("User-Agent", ua).timeout(Duration::from_secs(8)).send().await.ok()?.json::<Value>().await.ok() },
+        async { ctx.client.get(loose_url).header("User-Agent", ua).timeout(Duration::from_secs(8)).send().await.ok()?.json::<Value>().await.ok() }
+    );
+    if let Some(v) = g.filter(|v| v.get("id").is_some()) {
+        items.push(v);
+    }
+    for list in [sr, lo].into_iter().flatten() {
+        if let Value::Array(a) = list {
+            items.extend(a);
+        }
+    }
+    let want_title = base_title(title);
+    let want_artists: Vec<String> = artist
+        .split([',', '&', ';', '/'])
+        .map(|a| a.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect::<String>())
+        .filter(|a| !a.is_empty())
+        .collect();
+    let mut best: Option<(f64, &Value, f64)> = None;
+    for it in &items {
+        if it.get("instrumental").and_then(Value::as_bool).unwrap_or(false) {
+            continue;
+        }
+        let synced = !text(it.get("syncedLyrics")).is_empty();
+        let plain = !text(it.get("plainLyrics")).is_empty();
+        if !synced && !plain {
+            continue;
+        }
+        let got = base_title(text(it.get("trackName")));
+        let mut score = if got == want_title {
+            4.0
+        } else if !got.is_empty() && !want_title.is_empty() && (got.contains(&want_title) || want_title.contains(&got)) {
+            2.0
+        } else {
+            -6.0
+        };
+        let who: String = text(it.get("artistName")).to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect();
+        score += if want_artists.is_empty() || want_artists.iter().any(|a| who.contains(a.as_str()) || a.contains(who.as_str())) { 2.0 } else { -2.0 };
+        if synced {
+            score += 2.0;
+        }
+        let their = it.get("duration").and_then(Value::as_f64).unwrap_or(0.0);
+        let diff = if dur > 0.0 && their > 0.0 { (their - dur).abs() } else { 0.0 };
+        if dur > 0.0 && their > 0.0 {
+            score += if diff <= 1.0 { 5.0 } else if diff <= 2.0 { 4.0 } else if diff <= 4.0 { 2.0 } else if diff <= 8.0 { -1.0 } else { -4.0 };
+        }
+        if best.as_ref().is_none_or(|b| score > b.0) {
+            best = Some((score, it, diff));
+        }
+    }
+    let (score, it, diff) = best?;
+    if score < 1.0 {
+        return None;
+    }
+    let synced = text(it.get("syncedLyrics"));
+    if !synced.is_empty() {
+        Some((synced.to_string(), true, diff))
+    } else {
+        Some((text(it.get("plainLyrics")).to_string(), false, diff))
+    }
+}
+
+/// Lyrics for a track. The sources are tried in turn until one has them: LRCLIB (the recording with the same length), NetEase, then
+/// plain text from LRCLIB or Genius. `approx` is set when the timing may be a little off.
 pub async fn lyrics(ctx: &Ctx, title: &str, artist: &str, duration: &str) -> Value {
     let empty = json!({ "success": true, "lyrics": "", "isCustom": false, "isExplicit": false });
     if title.trim().is_empty() {
@@ -856,42 +1049,19 @@ pub async fn lyrics(ctx: &Ctx, title: &str, artist: &str, duration: &str) -> Val
     if let Ok(custom) = std::fs::read_to_string(custom_lyrics_path(ctx, title, artist)) {
         return json!({ "success": true, "lyrics": custom, "isCustom": true, "isExplicit": false });
     }
-    let pick = |v: &Value| -> String {
-        let synced = text(v.get("syncedLyrics"));
-        if !synced.is_empty() { synced.to_string() } else { text(v.get("plainLyrics")).to_string() }
-    };
-    let mut found = String::new();
-    let get_url = format!(
-        "https://lrclib.net/api/get?track_name={}&artist_name={}{}",
-        urlencode(title),
-        urlencode(artist),
-        if duration.parse::<f64>().unwrap_or(0.0) > 0.0 { format!("&duration={}", duration.parse::<f64>().unwrap_or(0.0).round()) } else { String::new() }
-    );
-    if let Ok(r) = ctx.client.get(get_url).header("User-Agent", "Jeem").timeout(Duration::from_secs(8)).send().await {
-        if r.status().is_success() {
-            if let Ok(v) = r.json::<Value>().await {
-                found = pick(&v);
-            }
-        }
-    }
-    if found.is_empty() {
-        let search_url = format!("https://lrclib.net/api/search?q={}", urlencode(&format!("{artist} {title}")));
-        if let Ok(r) = ctx.client.get(search_url).header("User-Agent", "Jeem").timeout(Duration::from_secs(8)).send().await {
-            if let Ok(Value::Array(items)) = r.json::<Value>().await {
-                found = items
-                    .iter()
-                    .find(|i| !text(i.get("syncedLyrics")).is_empty())
-                    .or_else(|| items.first())
-                    .map(pick)
-                    .unwrap_or_default();
-            }
-        }
-    }
-    // No timed lyrics from LRCLIB: try the second source before settling for plain text.
+    let dur = duration.parse::<f64>().unwrap_or(0.0);
     let is_timed = |t: &str| t.lines().filter(|l| l.trim_start().starts_with('[') && l.contains(':')).count() >= 4;
-    if !is_timed(&found) {
-        if let Some(lrc) = crate::extras::netease_lrc(ctx, title, artist, duration.parse::<f64>().unwrap_or(0.0)).await {
+    let mut found = String::new();
+    let mut approx = false;
+    if let Some((text, timed, diff)) = lrclib_best(ctx, title, artist, dur).await {
+        approx = timed && dur > 0.0 && diff > 3.5;
+        found = text;
+    }
+    // LRCLIB has no timed text, or only for a recording of another length: the second source is asked.
+    if !is_timed(&found) || approx {
+        if let Some(lrc) = crate::extras::netease_lrc(ctx, title, artist, dur).await {
             found = lrc;
+            approx = false;
         }
     }
     // Still nothing: plain text from Genius, so the track at least shows its words.
@@ -900,7 +1070,7 @@ pub async fn lyrics(ctx: &Ctx, title: &str, artist: &str, duration: &str) -> Val
             found = text;
         }
     }
-    json!({ "success": true, "lyrics": found, "isCustom": false, "isExplicit": false })
+    json!({ "success": true, "lyrics": found, "isCustom": false, "isExplicit": false, "approx": approx })
 }
 
 fn dz_track(it: &Value, i: usize) -> Value {

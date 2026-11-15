@@ -10,21 +10,21 @@
 
   <style>
     :root {
-      --bg-color: #8d5ef2;
-      --container-fill: #d8ceed;
-      --container-fill-hover: #e3d9f4;
-      --card-bg: #c8bddd;
-      --card-bg-hover: #bfb2d8;
+      --bg-color: #7ee0c0;
+      --container-fill: #fbeadd;
+      --container-fill-hover: #fff2e8;
+      --card-bg: #f6d5bd;
+      --card-bg-hover: #f1caaf;
       --text-color: #211f24;
-      --hero-text: #ffffff;
+      --hero-text: #0f3a2e;
 
       --btn-bg: #ffffff;
       --btn-text: #211f24;
-      --btn-bg-hover: #f5effe;
-      --btn-secondary-bg: #c4b8dc;
-      --btn-secondary-hover: #baaecd;
+      --btn-bg-hover: #fff6ee;
+      --btn-secondary-bg: #f0c9ae;
+      --btn-secondary-hover: #e9bb9b;
 
-      --slider-track: #b8abd0;
+      --slider-track: #e6b99a;
       --ripple-color: rgba(33, 31, 36, 0.24);
       --font-google-sans: 'Google Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     }
@@ -102,6 +102,16 @@
 
     .is-hidden {
       display: none !important;
+    }
+
+    /* Left out of the setup: these things are in Settings, or are not needed at the start. */
+    .row:has([data-key="jeem_custom_bg_enabled"]),
+    .row:has([data-key="jeem_no_hand_cursor"]),
+    .stacked-container:has(#spotifyUrl) {
+      display: none !important;
+    }
+    .dots i:nth-child(n+4) {
+      display: none;
     }
 
     .setup-viewport {
@@ -213,7 +223,6 @@
     .icon-tint {
       display: grid;
       place-items: center;
-      filter: url(#iconTint);
     }
 
     .jeem-icon {
@@ -446,9 +455,9 @@
       --m-accent: #5865f2;
     }
     .mockup-window.mock-light-purple-vibrant {
-      background-color: #7943ea;
-      --m-surface: #c7b6e9;
-      --m-subtle: #b19ddc;
+      background-color: #5fcfa9;
+      --m-surface: #fbeadd;
+      --m-subtle: #f0c9ae;
       --m-accent: #ffffff;
     }
 
@@ -1177,7 +1186,7 @@
                 </div>
                 <div class="mock-bottombar"><div class="mock-controls"></div></div>
               </div>
-              <span class="theme-card-name" data-i18n>Light Purple</span>
+              <span class="theme-card-name">Jeem</span>
             </div>
           </div>
         </div>
@@ -1187,7 +1196,7 @@
             <div class="slider-block">
               <div class="slider-header">
                 <span data-i18n>Color Accent</span>
-                <span id="hueVal">Purple (260°)</span>
+                <span id="hueVal">Cyan (160°)</span>
               </div>
               <div class="sl hue">
                 <div class="sl-active"></div><div class="sl-inactive"></div>
@@ -1289,7 +1298,7 @@
           </button>
           <div class="dots"><i></i><i></i><i></i><i></i><i></i></div>
           <button class="btn primary" data-nav="next">
-            <span data-i18n>Continue</span>
+            <span data-i18n>Let's go</span>
             <svg class="arrow-right" viewBox="0 0 24 24">
               <path d="M5 13h11.86l-5.43 5.43 1.42 1.42L21.14 12l-8.29-8.29-1.42 1.42L16.86 11H5v2z"/>
             </svg>
@@ -1531,6 +1540,8 @@
     }
 
     function go(to) {
+      // The setup has three steps: the last one ends it (the launcher and Discord steps are left out)
+      if (to > 3) { if (current === 3 && !busy) document.getElementById('finishBtn').click(); return; }
       if (busy || to === current || to < 1 || to > TOTAL_STEPS) return;
       busy = true;
 
@@ -1573,7 +1584,7 @@
     const satVal = document.getElementById('satVal');
     const themeCards = document.querySelectorAll('.theme-card');
 
-    const themeState = { preset: 'light-purple-vibrant', h: 260, b: 66, s: 85 };
+    const themeState = { preset: 'light-purple-vibrant', h: 160, b: 66, s: 85 };
 
     function syncSlider(input) {
       const v = (input.value - input.min) / (input.max - input.min);
@@ -1692,13 +1703,13 @@
         }
       },
       'light-purple-vibrant': {
-        h: 260, b: 66, s: 85,
+        h: 160, b: 66, s: 85,
         vars: {
-          '--bg-color': '#8d5ef2', '--container-fill': '#d8ceed', '--container-fill-hover': '#e3d9f4',
-          '--card-bg': '#c8bddd', '--card-bg-hover': '#bfb2d8', '--slider-track': '#b8abd0',
-          '--text-color': '#211f24', '--hero-text': '#ffffff', '--btn-bg': '#ffffff',
-          '--btn-text': '#211f24', '--btn-bg-hover': '#f5effe', '--btn-secondary-bg': '#c4b8dc',
-          '--btn-secondary-hover': '#baaecd', '--ripple-color': 'rgba(33, 31, 36, 0.24)'
+          '--bg-color': '#7ee0c0', '--container-fill': '#fbeadd', '--container-fill-hover': '#fff2e8',
+          '--card-bg': '#f6d5bd', '--card-bg-hover': '#f1caaf', '--slider-track': '#e6b99a',
+          '--text-color': '#211f24', '--hero-text': '#0f3a2e', '--btn-bg': '#ffffff',
+          '--btn-text': '#211f24', '--btn-bg-hover': '#fff6ee', '--btn-secondary-bg': '#f0c9ae',
+          '--btn-secondary-hover': '#e9bb9b', '--ripple-color': 'rgba(33, 31, 36, 0.24)'
         }
       }
     };
@@ -2110,7 +2121,7 @@
         toggles: { ...toggles },
         background: bgUrl || null,
         discord: discordOn,
-        launcher: launcherOn && launcherAvailable,
+        launcher: false,
         spotify: pendingImport
       };
 

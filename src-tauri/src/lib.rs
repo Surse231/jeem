@@ -1,4 +1,5 @@
 mod addons;
+mod ai;
 mod cache;
 mod catalog;
 mod discord;

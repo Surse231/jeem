@@ -148,98 +148,202 @@ fn keyword(settings: &Value, russian: bool) -> Option<String> {
     if words.is_empty() { None } else { Some(words.join(" ")) }
 }
 
+fn is_youtube_id(id: &str) -> bool {
+    id.len() == 11 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+fn track_key(artist: &str, title: &str) -> String {
+    format!("{}::{}", norm(artist), norm(title))
+}
+
+/// Pick `n` items without repeats; heavier items are more likely.
+fn pick_weighted(rng: &mut Rng, items: &[(usize, f64)], n: usize) -> Vec<usize> {
+    let mut pool: Vec<(usize, f64)> = items.to_vec();
+    let mut out = Vec::new();
+    while out.len() < n && !pool.is_empty() {
+        let total: f64 = pool.iter().map(|x| x.1).sum();
+        let mut r = (rng.next() % 10_000) as f64 / 10_000.0 * total;
+        let mut at = pool.len() - 1;
+        for (i, x) in pool.iter().enumerate() {
+            if r < x.1 {
+                at = i;
+                break;
+            }
+            r -= x.1;
+        }
+        out.push(pool.remove(at).0);
+    }
+    out
+}
+
+fn views_of(t: &Value) -> f64 {
+    let p = s(t.get("playsText")).trim().to_uppercase();
+    let (num, mult) = match p.chars().last() {
+        Some('M') => (&p[..p.len() - 1], 1e6),
+        Some('K') => (&p[..p.len() - 1], 1e3),
+        Some('B') => (&p[..p.len() - 1], 1e9),
+        _ => (p.as_str(), 1.0),
+    };
+    num.replace(',', "").parse::<f64>().unwrap_or(0.0) * mult
+}
+
 pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value> {
     let mut rng = Rng::new();
     let settings = body.get("settings").cloned().unwrap_or(Value::Null);
     let language = s(settings.get("language")).to_string();
     let familiarity = s(settings.get("familiarity")).to_string();
-
-    // Who the listener likes: strongest artists first, then the artists of seed tracks and favourites.
-    let mut artists: Vec<String> = Vec::new();
-    let mut seen_artist = HashSet::new();
-    let mut add_artist = |name: &str, artists: &mut Vec<String>| {
-        let first = name.split([',', '&', ';']).next().unwrap_or("").trim().to_string();
-        if !first.is_empty() && first.to_lowercase() != "unknown artist" && seen_artist.insert(norm(&first)) {
-            artists.push(first);
-        }
-    };
-    for a in body.pointer("/clientProfile/topArtists").and_then(Value::as_array).into_iter().flatten() {
-        add_artist(s(Some(a)), &mut artists);
-    }
-    for key in ["seeds", "favorites", "history"] {
-        for t in body.get(key).and_then(Value::as_array).into_iter().flatten().take(20) {
-            add_artist(s(t.get("artist")), &mut artists);
-        }
-    }
     let region = s(body.get("region")).to_string();
-    let mut chart: Vec<Value> = Vec::new();
-    if artists.len() < 4 {
-        chart = ytm::yt_chart(ctx, &region).await.1;
-        for t in chart.iter().take(14) {
-            add_artist(s(t.get("artist")), &mut artists);
-        }
-    }
-    // The language of the listener's own artists: a stream for someone who listens to Russian, Korean, ... music stays mostly in it.
-    let cold = !chart.is_empty();
-    let own_texts: Vec<String> = if cold {
-        chart.iter().take(15).map(|t| format!("{} {}", s(t.get("title")), s(t.get("artist")))).collect()
-    } else {
-        artists.iter().take(12).cloned().collect()
+
+    let list = |p: &str| -> HashSet<String> {
+        body.pointer(p).and_then(Value::as_array).into_iter().flatten().map(|v| s(Some(v)).to_lowercase()).collect()
     };
-    let own = own_texts.len();
+    let avoid_ids = list("/avoid/ids");
+    let avoid_artists: HashSet<String> = list("/avoid/artists").iter().map(|a| norm(a)).collect();
+    let avoid_keys: HashSet<String> = list("/avoid/keys")
+        .iter()
+        .map(|k| {
+            let mut it = k.splitn(2, "::");
+            format!("{}::{}", norm(it.next().unwrap_or("")), norm(it.next().unwrap_or("")))
+        })
+        .collect();
+    let known: HashSet<String> = if familiarity == "unknown" {
+        list("/knownArtists").iter().map(|a| norm(a)).collect()
+    } else {
+        HashSet::new()
+    };
+
+    let arr = |k: &str| -> Vec<Value> { body.get(k).and_then(Value::as_array).cloned().unwrap_or_default() };
+    let favorites = arr("favorites");
+    let history = arr("history");
+    let liked_now = arr("likedNow");
+    let favorite_keys: HashSet<String> = favorites.iter().map(|t| track_key(s(t.get("artist")), s(t.get("title")))).collect();
+
+    // Seeds: everything the listener liked (newer likes count more), what they were just given a like for, and a little of the recent history.
+    let mut seeds: Vec<Value> = Vec::new();
+    let mut weights: Vec<(usize, f64)> = Vec::new();
+    let mut seen_seed = HashSet::new();
+    let mut push_seed = |t: &Value, w: f64, seeds: &mut Vec<Value>, weights: &mut Vec<(usize, f64)>| {
+        let a = norm(s(t.get("artist")).split([',', '&', ';']).next().unwrap_or(""));
+        if a.is_empty() || avoid_artists.contains(&a) || s(t.get("platform")) == "local" {
+            return;
+        }
+        if !seen_seed.insert(track_key(s(t.get("artist")), s(t.get("title")))) {
+            return;
+        }
+        seeds.push(t.clone());
+        weights.push((seeds.len() - 1, w));
+    };
+    for t in &liked_now {
+        push_seed(t, 6.0, &mut seeds, &mut weights);
+    }
+    for (i, t) in favorites.iter().enumerate() {
+        push_seed(t, 1.0 + 2.0 / (1.0 + i as f64 * 0.08), &mut seeds, &mut weights);
+    }
+    for t in history.iter().take(12) {
+        push_seed(t, 0.6, &mut seeds, &mut weights);
+    }
+
+    // The language of the listener's own music: a stream for someone who listens to Russian, Korean, ... music stays mostly in it.
+    let own_texts: Vec<String> = seeds.iter().take(40).map(|t| format!("{} {}", s(t.get("title")), s(t.get("artist")))).collect();
     let mut counts = [0usize; 9];
     for a in &own_texts {
         counts[script_of(a) as usize] += 1;
     }
-    let dominant: u8 = (1..9u8).filter(|k| own >= 3 && counts[*k as usize] * 10 >= own * 7).next().unwrap_or(0);
-    if language == "russian" {
-        let ru: Vec<String> = artists.iter().filter(|a| has_cyrillic(a)).cloned().collect();
-        if !ru.is_empty() {
-            artists = ru;
-        }
-    } else if language == "foreign" {
-        let en: Vec<String> = artists.iter().filter(|a| !has_cyrillic(a)).cloned().collect();
-        if !en.is_empty() {
-            artists = en;
-        }
-    }
-    // Mostly the strongest artists, sometimes a deeper one, so the stream does not loop.
-    let mut picked: Vec<String> = Vec::new();
-    let head = artists.len().min(6);
-    let mut top: Vec<String> = artists[..head].to_vec();
-    rng.shuffle(&mut top);
-    picked.extend(top.into_iter().take(2));
-    if artists.len() > head {
-        picked.push(artists[head + (rng.next() % (artists.len() - head) as u64) as usize].clone());
-    }
+    let own = own_texts.len();
+    let dominant: u8 = (1..9u8).find(|k| own >= 3 && counts[*k as usize] * 10 >= own * 7).unwrap_or(0);
 
-    let popular = familiarity == "popular";
-    let mut taste: Vec<Value> = Vec::new();
-    let radios = match picked.len() {
-        0 => (Vec::new(), Vec::new(), Vec::new()),
-        1 => (artist_radio(ctx, &picked[0], popular).await, Vec::new(), Vec::new()),
-        2 => {
-            let (a, b) = tokio::join!(artist_radio(ctx, &picked[0], popular), artist_radio(ctx, &picked[1], popular));
-            (a, b, Vec::new())
+    // The radios of three seeds are the taste part of the stream.
+    let picked = pick_weighted(&mut rng, &weights, 3);
+    let mut radio_ids: Vec<String> = Vec::new();
+    for i in &picked {
+        let t = &seeds[*i];
+        let id = s(t.get("id"));
+        if is_youtube_id(id) {
+            radio_ids.push(id.to_string());
+        } else if let Some(v) = ytm::find_video_id(ctx, s(t.get("artist")), s(t.get("title"))).await {
+            radio_ids.push(v);
         }
-        _ => tokio::join!(
-            artist_radio(ctx, &picked[0], popular),
-            artist_radio(ctx, &picked[1], popular),
-            artist_radio(ctx, &picked[2], popular)
-        ),
-    };
-    taste.extend(radios.0);
-    taste.extend(radios.1);
-    taste.extend(radios.2);
-    if cold {
-        // A new listener: the country's own chart is part of the stream.
-        taste.extend(chart.iter().take(30).cloned());
     }
-    if popular {
-        taste.extend(ytm::deezer_chart(ctx, 40).await);
-        taste.sort_by_key(|t| std::cmp::Reverse(t.get("rank").and_then(Value::as_u64).unwrap_or(0)));
-    } else {
-        rng.shuffle(&mut taste);
+    let mut radios: Vec<Vec<Value>> = Vec::new();
+    {
+        let (i0, i1, i2) = (
+            radio_ids.first().cloned().unwrap_or_default(),
+            radio_ids.get(1).cloned().unwrap_or_default(),
+            radio_ids.get(2).cloned().unwrap_or_default(),
+        );
+        let (a, b, c) = tokio::join!(ytm::yt_radio(ctx, &i0), ytm::yt_radio(ctx, &i1), ytm::yt_radio(ctx, &i2));
+        radios.extend([a, b, c]);
+    }
+    let popular = familiarity == "popular";
+
+    // How many of the radios agree on an artist is the strongest sign that the artist fits.
+    let mut artist_hits: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for r in &radios {
+        let mut once = HashSet::new();
+        for t in r {
+            let a = norm(s(t.get("artist")).split([',', '&', ';']).next().unwrap_or(""));
+            if once.insert(a.clone()) {
+                *artist_hits.entry(a).or_insert(0) += 1;
+            }
+        }
+    }
+    let mut scored: Vec<(f64, Value)> = Vec::new();
+    for r in radios {
+        let n = r.len().max(1) as f64;
+        for (pos, t) in r.into_iter().enumerate() {
+            let a = norm(s(t.get("artist")).split([',', '&', ';']).next().unwrap_or(""));
+            let key = track_key(s(t.get("artist")), s(t.get("title")));
+            if avoid_ids.contains(&s(t.get("id")).to_lowercase()) || avoid_artists.contains(&a) || avoid_keys.contains(&key) || known.contains(&a) {
+                continue;
+            }
+            // tracks the listener already liked are not "new"; the "Favourite" character mixes them in separately
+            if favorite_keys.contains(&key) {
+                continue;
+            }
+            let text_all = format!("{} {}", s(t.get("title")), s(t.get("artist")));
+            let cyr = has_cyrillic(&text_all);
+            if (language == "russian" && !cyr) || (language == "foreign" && cyr) {
+                continue;
+            }
+            let mut score = 1.0 - pos as f64 / n * 0.4 + (rng.next() % 1000) as f64 / 1000.0 * 1.1;
+            score += 0.9 * (*artist_hits.get(&a).unwrap_or(&1) as f64 - 1.0);
+            if popular {
+                score += (views_of(&t).max(1.0).log10() - 5.0).max(0.0) * 0.5;
+            }
+            if language.is_empty() && dominant != 0 && script_of(&text_all) != dominant {
+                score -= 1.6;
+            }
+            scored.push((score, t));
+        }
+    }
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    let mut taste: Vec<Value> = scored.into_iter().map(|x| x.1).collect();
+
+    // Nothing from YouTube (offline, no likes): artist radios on Deezer, then the country chart.
+    let mut chart: Vec<Value> = Vec::new();
+    if taste.is_empty() {
+        let mut names: Vec<String> = Vec::new();
+        for t in seeds.iter().take(12) {
+            let first = s(t.get("artist")).split([',', '&', ';']).next().unwrap_or("").trim().to_string();
+            if !first.is_empty() && !names.contains(&first) {
+                names.push(first);
+            }
+        }
+        rng.shuffle(&mut names);
+        for name in names.iter().take(2) {
+            taste.extend(artist_radio(ctx, name, popular).await);
+        }
+        if taste.is_empty() {
+            chart = ytm::yt_chart(ctx, &region).await.1;
+            taste = chart.clone();
+            rng.shuffle(&mut taste);
+        }
+    } else if seeds.len() < 3 {
+        // a new listener: the chart of the country is part of the stream
+        chart = ytm::yt_chart(ctx, &region).await.1;
+        let mut c = chart.clone();
+        rng.shuffle(&mut c);
+        taste.extend(c.into_iter().take(15));
     }
 
     let russian_words = language == "russian";
@@ -249,31 +353,37 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
     };
     rng.shuffle(&mut themed);
     if taste.is_empty() && themed.is_empty() {
-        taste = if chart.is_empty() { ytm::yt_chart(ctx, &region).await.1 } else { chart.clone() };
-        if taste.is_empty() {
-            taste = ytm::deezer_chart(ctx, 60).await;
-        }
+        taste = ytm::deezer_chart(ctx, 60).await;
         rng.shuffle(&mut taste);
     }
-
-    // What must not come back: disliked artists and tracks, already queued tracks, known artists when asked for new music.
-    let list = |p: &str| -> HashSet<String> {
-        body.pointer(p).and_then(Value::as_array).into_iter().flatten().map(|v| s(Some(v)).to_lowercase()).collect()
-    };
-    let avoid_ids = list("/avoid/ids");
-    let avoid_artists: HashSet<String> = list("/avoid/artists").iter().map(|a| norm(a)).collect();
-    let known: HashSet<String> = if familiarity == "unknown" {
-        list("/knownArtists").iter().map(|a| norm(a)).collect()
-    } else {
-        HashSet::new()
-    };
     let instrumental = language == "instrumental";
+
+    // Optional: an AI model the listener connected themselves re-orders the best candidates.
+    if let Some(ai) = body.get("ai").filter(|a| !s(a.get("key")).is_empty()) {
+        let head: Vec<Value> = taste.iter().take(40).cloned().collect();
+        let liked: Vec<String> = favorites.iter().take(30).map(|t| format!("{} - {}", s(t.get("artist")), s(t.get("title")))).collect();
+        let disliked: Vec<String> = body
+            .get("dislikedList")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .take(20)
+            .map(|v| s(Some(v)).to_string())
+            .collect();
+        if let Some(order) = crate::ai::rerank(ctx, ai, &liked, &disliked, &head, &settings).await {
+            let mut reordered: Vec<Value> = order.iter().filter_map(|i| head.get(*i).cloned()).collect();
+            let used: HashSet<usize> = order.into_iter().collect();
+            reordered.extend(head.iter().enumerate().filter(|(i, _)| !used.contains(i)).map(|(_, t)| t.clone()));
+            reordered.extend(taste.iter().skip(40).cloned());
+            taste = reordered;
+        }
+    }
 
     let mut out: Vec<Value> = Vec::new();
     let mut seen = HashSet::new();
     let mut per_artist: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let (mut ti, mut hi) = (taste.into_iter(), themed.into_iter());
-    let themed_only = instrumental || picked.is_empty();
+    let themed_only = instrumental || seeds.is_empty() && chart.is_empty();
     let mut turn = 0usize;
     loop {
         if out.len() >= limit {
@@ -286,15 +396,11 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
         let Some(t) = next else { break };
         let (title, artist) = (s(t.get("title")).to_string(), s(t.get("artist")).to_string());
         let a = norm(&artist);
-        if avoid_ids.contains(&s(t.get("id")).to_lowercase()) || avoid_artists.contains(&a) || known.contains(&a) {
+        if avoid_ids.contains(&s(t.get("id")).to_lowercase()) || avoid_artists.contains(&a) || known.contains(&a) || avoid_keys.contains(&track_key(&artist, &title)) {
             continue;
         }
         let cyr = has_cyrillic(&title) || has_cyrillic(&artist);
         if (language == "russian" && !cyr) || (language == "foreign" && cyr) {
-            continue;
-        }
-        // Without an explicit language, keep to the listener's own one, letting every fourth track be something else.
-        if language.is_empty() && dominant != 0 && script_of(&format!("{title} {artist}")) != dominant && out.len() % 4 != 3 {
             continue;
         }
         if !seen.insert(format!("{a}:{}", norm(&title))) {

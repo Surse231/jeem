@@ -79,15 +79,60 @@ migrated = true;
 }
 
 try { origClear.call(window.localStorage); } catch (_) {}
+
+/* The whole state is written as one file on every change, so it must stay small. Things that can be made again (audio analysis of
+   tracks, translation caches) are the first to go when it grows, then the biggest of the rest. */
+(function trimOversizedState() {
+  const sizeOf = (k) => k.length + String(diskMap[k]).length;
+  let total = 0;
+  for (const k in diskMap) total += sizeOf(k);
+  const LIMIT = 24 * 1024 * 1024;
+  if (total <= LIMIT) return;
+  for (const k of Object.keys(diskMap)) {
+    if (k.startsWith('jeem_audio_analysis_') || k.startsWith('jeem_i18n_') || k === 'jeem_trending_cache' || k === 'jeem_new_releases') {
+      total -= sizeOf(k);
+      delete diskMap[k];
+    }
+  }
+  if (total > LIMIT) {
+    const keep = /^(devsize_|jeem_user_|jeem_artist_listen|jeem_listen_extra|jeem_ui_lang|jeem_theme|jeem_gsync)/;
+    const bulky = Object.keys(diskMap).filter(k => !keep.test(k)).sort((a, b) => sizeOf(b) - sizeOf(a));
+    for (const k of bulky) {
+      if (total <= LIMIT) break;
+      total -= sizeOf(k);
+      delete diskMap[k];
+    }
+  }
+  migrated = true;
+})();
 window.__JEEM_STORAGE_MAP__ = diskMap;
 
 if (migrated) {
 window.electronAPI.storageSaveSync(diskMap);
 }
 
-function flushAsync() {
-window.electronAPI.storageSaveBatch(diskMap);
+// Writes are gathered for a moment (a burst of changes is one file write), and written at once when the window is hidden or closed.
+let flushTimer = 0;
+function saveNow() {
+  flushTimer = 0;
+  try {
+    const p = window.electronAPI.storageSaveBatch(diskMap);
+    if (p && typeof p.then === 'function') p.then(r => { if (r && r.ok === false) console.error('Jeem could not save its data:', r.error); }).catch(() => {});
+  } catch (_) {}
 }
+function flushAsync() {
+  if (flushTimer) return;
+  flushTimer = setTimeout(saveNow, 300);
+}
+function flushNowSync() {
+  if (!flushTimer) return;
+  clearTimeout(flushTimer);
+  flushTimer = 0;
+  try { window.electronAPI.storageSaveSync(diskMap); } catch (_) {}
+}
+window.addEventListener('pagehide', flushNowSync);
+window.addEventListener('beforeunload', flushNowSync);
+document.addEventListener('visibilitychange', () => { if (document.hidden) flushNowSync(); });
 
 Storage.prototype.getItem = function(key) {
 if (this === window.localStorage) {
@@ -6047,7 +6092,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const onlineParam = (isLocalTrack || isTikTok || !getAdv('online_lyrics', true)) ? '0' : '1';
         const durationParam = (state.currentTrack && state.currentTrack.duration) ? `&duration=${encodeURIComponent(state.currentTrack.duration)}` : '';
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 4000);
+        const timeoutId = setTimeout(() => controller.abort(), 16000);
         try {
           const res = await fetch(`http://127.0.0.1:${state.serverPort}/api/lyrics?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}&online=${onlineParam}&source=${encodeURIComponent(source)}${durationParam}`, { signal: controller.signal });
           data = await res.json();
@@ -6091,6 +6136,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
       state.isCustomLyrics = !!data.isCustom;
+      if (data.approx) showLyricsWarnToast(t('The timing of these lyrics may be slightly off'));
 
       const raw = data.lyrics;
       const lines = raw.split('\n');
@@ -6602,7 +6648,24 @@ document.addEventListener('DOMContentLoaded', async () => {
       'Home': 'Главная',
       'Trending now': 'Сейчас в тренде',
       'New releases': 'Новые релизы',
+      'Like the track': 'Лайкнуть трек',
+      'Not for me (My Vibe)': 'Не для меня («Моя волна»)',
+      'Back / Forward (mouse side buttons)': 'Назад / Вперёд (боковые кнопки мыши)',
+      'YouTube (everything)': 'YouTube (всё подряд)',
+      'The timing of these lyrics may be slightly off': 'Тайминг этого текста может немного не совпадать',
+      'All platforms': 'Все платформы',
+      'Searching all of YouTube': 'Поиск по всему YouTube',
+      'The search covers the whole of YouTube, so besides tracks you will see all kinds of videos: podcasts, interviews, shows and more. Use YouTube Music or All platforms to see music only.': 'Поиск идёт по всей платформе YouTube, поэтому кроме треков вы увидите любые видео: подкасты, интервью, шоу и многое другое. Чтобы видеть только музыку, выберите YouTube Music или «Все платформы».',
+      "Don't show this again": 'Больше не показывать',
       'By region': 'По региону',
+      'Smart picks (optional AI)': 'Умный подбор (ИИ, по желанию)',
+      'Paste a free API key': 'Вставьте бесплатный ключ',
+      'Check': 'Проверить',
+      'Checking...': 'Проверяю...',
+      'With a key an AI model sorts the candidates for you. Without it My Vibe works on its own.': 'С ключом ИИ сортирует подобранные треки под вас. Без него «Моя волна» работает сама. Ключ получить: ',
+      'The key works. AI picks are on.': 'Ключ работает, ИИ включён',
+      'The key was not accepted': 'Ключ не принят',
+      'Could not reach the service': 'Не удалось связаться с сервисом',
       'Automatic': 'Автоматически',
       'Charts and new tracks follow this country': 'Чарты и новые треки подбираются по этой стране',
       'Single': 'Сингл',
@@ -8282,6 +8345,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function openTvKaraoke() {
+    if (typeof window.syncLyricsLikeButtons === 'function') window.syncLyricsLikeButtons();
     if (!el.tvKaraoke || !el.lyricsContainer) return;
     if (state.isTvKaraokeOpen) return;
     state.isTvKaraokeOpen = true;
@@ -9843,7 +9907,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (!state._isNaturalEnding && state.myWaveActive && state.currentTrack) {
       const cur = (el.nativeAudio && typeof el.nativeAudio.currentTime === 'number') ? el.nativeAudio.currentTime : 0;
-      if (cur < 12 && typeof recordWaveSkip === 'function') {
+      const alreadyCounted = state._skipRecordedFor && state._skipRecordedFor === ((typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(state.currentTrack) : '') || state.currentTrack.id);
+      if (cur < 12 && !alreadyCounted && typeof recordWaveSkip === 'function') {
         recordWaveSkip(state.currentTrack);
         state._skipRecordedFor = (typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(state.currentTrack) : '') || state.currentTrack.id;
       }
@@ -12165,11 +12230,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     hoverPrepareTimer = setTimeout(() => prepareStreams([row._trackData]), 140);
   });
 
-  function setSearchIconCover(thumb) {
+  function setSearchIconCover(thumb, artist) {
     const btn = document.getElementById('search-icon-btn');
     if (!btn) return;
     let img = btn.querySelector('.search-icon-cover');
-    if (!thumb) { if (img) img.remove(); const svg = btn.querySelector('.search-icon'); if (svg) svg.classList.remove('hidden'); return; }
+    if (!thumb) { if (img) img.remove(); const svg = btn.querySelector('.search-icon'); if (svg) svg.classList.remove('hidden'); delete btn.dataset.artist; btn.removeAttribute('title'); return; }
+    // with a cover shown the button opens the artist of the best match
+    if (artist) { btn.dataset.artist = artist; btn.title = artist; } else { delete btn.dataset.artist; }
     const svg = btn.querySelector('.search-icon');
     if (!img) { img = document.createElement('img'); img.className = 'search-icon-cover'; img.alt = ''; btn.appendChild(img); }
     img.src = thumb;
@@ -12243,7 +12310,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       state.searchOffset = data.tracks.length;
       state.searchHasMore = !!data.hasMore;
       const firstThumb = data.tracks.length ? getTrackThumbUrl(data.tracks[0]) : '';
-      setSearchIconCover(firstThumb);
+      setSearchIconCover(firstThumb, data.tracks.length ? String(data.tracks[0].artist || '').split(/[,;&]/)[0].trim() : '');
       recordSearchQuery(query, firstThumb);
       prefetchVisibleTracks(data.tracks);
 
@@ -13487,6 +13554,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       scrollParent.removeEventListener('scroll', container._vScrollHandler);
     }
     
+    if (typeof unobserveTitlesUnder === 'function') unobserveTitlesUnder(container);
     container.innerHTML = '';
     
     if (!tracks || tracks.length === 0) {
@@ -13503,7 +13571,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     const itemHeight = document.body.classList.contains('track-rows-compact') ? 56 : 64;
-    const overscan = 15;
+    const overscan = 8;
     
     function renderChunk() {
       if (!scrollParent || container._isDraggingReorder) return;
@@ -13535,6 +13603,8 @@ document.addEventListener('DOMContentLoaded', async () => {
          fragment.appendChild(row);
       }
       
+      // the rows that leave must stop being observed, or the observer keeps every row ever shown and the list gets slower and slower
+      if (typeof unobserveTitlesUnder === 'function') unobserveTitlesUnder(container);
       container.innerHTML = '';
       container.style.paddingTop = `${startIndex * itemHeight}px`;
       container.style.paddingBottom = `${(list.length - endIndex) * itemHeight}px`;
@@ -13542,7 +13612,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       container._hasInitialRendered = true;
       highlightPlayingRow();
       observeTitlesUnder(container);
-      refreshOverflowFades(container);
     }
     
     container._vScrollHandler = () => {
@@ -14489,7 +14558,22 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
     });
   }
 
+  /* Like (and, while My Vibe plays, dislike) inside the lyrics view. */
+  function syncLyricsLikeButtons() {
+    const like = document.getElementById('btn-lyrics-like');
+    const dislike = document.getElementById('btn-lyrics-dislike');
+    const cur = state.currentTrack;
+    if (like) like.classList.toggle('active', !!cur && state.favorites.some(f => isSameTrack(f, cur)));
+    if (dislike) dislike.classList.toggle('hidden', !(cur && state.myWaveActive));
+    const tvLike = document.getElementById('btn-tvk-like');
+    const tvDislike = document.getElementById('btn-tvk-dislike');
+    if (tvLike) tvLike.classList.toggle('active', !!cur && state.favorites.some(f => isSameTrack(f, cur)));
+    if (tvDislike) tvDislike.classList.toggle('hidden', !(cur && state.myWaveActive));
+  }
+  window.syncLyricsLikeButtons = syncLyricsLikeButtons;
+
   function updateFavoriteIcon() {
+    syncLyricsLikeButtons();
     if (!el.favIcon) return;
     if (!state.currentTrack) {
       el.favIcon.setAttribute('fill', 'none');
@@ -16673,6 +16757,14 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
 
   function switchView(viewName) {
     if (viewName !== state.currentView) favGhosts = [];
+    // The My Vibe page uses the whole window: the right panel steps aside and returns when the page is left.
+    if (viewName === 'wave' && state.currentView !== 'wave') {
+      state._rpBeforeWave = !!state.isRightPanelOpen;
+      if (state.isRightPanelOpen && el.btnCloseRightPanel) el.btnCloseRightPanel.click();
+    } else if (viewName !== 'wave' && state.currentView === 'wave' && state._rpBeforeWave) {
+      state._rpBeforeWave = false;
+      if (!state.isRightPanelOpen && el.btnToggleLyricsPanel) el.btnToggleLyricsPanel.click();
+    }
     if (viewName !== 'artist' && viewName !== 'album' && viewName !== 'playlist-detail' && viewName !== 'settings') {
       if (viewName === 'discover') {
         if (!navSearchPending) {
@@ -17500,6 +17592,8 @@ function bindCoverHoldZoom(wrapEl) {
 
   if (el.searchIconBtn) {
     el.searchIconBtn.addEventListener('click', () => {
+      const artist = el.searchIconBtn.dataset.artist;
+      if (artist && el.searchIconBtn.querySelector('.search-icon-cover')) { openArtistProfile(artist); return; }
       const val = el.searchInput ? el.searchInput.value.trim() : '';
       if (val) performSearch(val);
     });
@@ -17512,18 +17606,53 @@ function bindCoverHoldZoom(wrapEl) {
   }
 
 
-  const showYtPlatform = localStorage.getItem('jeem_show_yt_platform') !== '0';
-  document.body.classList.toggle('show-yt-platform', showYtPlatform);
+  // YouTube is always available as its own source; "All platforms" means YouTube Music and SoundCloud only.
+  document.body.classList.add('show-yt-platform');
 
   function searchPlatformParam(p) {
-    if (p !== "all") return p;
-    return localStorage.getItem("jeem_show_yt_platform") !== "0" ? "all" : "all-noyt";
+    return p === 'all' ? 'all-noyt' : p;
+  }
+
+  /* Searching YouTube returns every kind of video, so the first time the listener is told (and may switch the notice off). */
+  function confirmYoutubeSearch() {
+    if (localStorage.getItem('jeem_yt_warning_hide') === '1') return Promise.resolve(true);
+    return new Promise((resolve) => {
+      let modal = document.getElementById('yt-warning-modal');
+      if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'yt-warning-modal';
+        modal.className = 'modal-backdrop hidden';
+        document.body.appendChild(modal);
+      }
+      modal.innerHTML = `
+        <div class="dialog-card yt-warning-card">
+          <h3 style="margin-top: 0;">${escapeHtml(t('Searching all of YouTube'))}</h3>
+          <p>${escapeHtml(t('The search covers the whole of YouTube, so besides tracks you will see all kinds of videos: podcasts, interviews, shows and more. Use YouTube Music or All platforms to see music only.'))}</p>
+          <label class="yt-warning-check"><input type="checkbox" id="yt-warning-hide"><span>${escapeHtml(t("Don't show this again"))}</span></label>
+          <div class="dialog-actions" style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button type="button" class="btn-outline-pill" id="btn-yt-warning-cancel">${escapeHtml(t('Cancel'))}</button>
+            <button type="button" class="btn-pill-primary" id="btn-yt-warning-ok">OK</button>
+          </div>
+        </div>`;
+      openModal(modal);
+      const done = (ok) => {
+        if (ok && modal.querySelector('#yt-warning-hide').checked) {
+          try { localStorage.setItem('jeem_yt_warning_hide', '1'); } catch (_) {}
+        }
+        closeModal(modal);
+        resolve(ok);
+      };
+      modal.querySelector('#btn-yt-warning-ok').onclick = () => done(true);
+      modal.querySelector('#btn-yt-warning-cancel').onclick = () => done(false);
+    });
+  }
+
+  async function requestPlatform(platform, triggerSearch = true) {
+    if (platform === 'youtube' && state.platform !== 'youtube' && !(await confirmYoutubeSearch())) return;
+    setPlatform(platform, triggerSearch);
   }
 
   function setPlatform(platform, triggerSearch = true) {
-    if (platform === 'youtube' && localStorage.getItem('jeem_show_yt_platform') === '0') {
-      platform = 'ytmusic';
-    }
     if (!['all', 'youtube', 'ytmusic', 'soundcloud'].includes(platform)) platform = 'ytmusic';
     state.platform = platform;
     localStorage.setItem('jeem_platform', platform);
@@ -17537,7 +17666,7 @@ function bindCoverHoldZoom(wrapEl) {
     const select = document.getElementById('select-engine-api');
     if (select) select.value = platform;
     const label = document.getElementById('engine-api-label');
-    const nameMap = { all: 'All sources', youtube: 'YouTube', ytmusic: 'YouTube Music', soundcloud: 'SoundCloud' };
+    const nameMap = { all: 'All platforms', youtube: 'YouTube', ytmusic: 'YouTube Music', soundcloud: 'SoundCloud' };
     if (label) label.textContent = nameMap[platform] || 'YouTube';
     const menu = document.getElementById('engine-api-menu');
     if (menu) {
@@ -17556,7 +17685,7 @@ function bindCoverHoldZoom(wrapEl) {
 
   const platformAllClickBtn = document.getElementById('platform-all');
   if (platformAllClickBtn) platformAllClickBtn.addEventListener('click', () => setPlatform('all'));
-  if (el.platformYt) el.platformYt.addEventListener('click', () => setPlatform('youtube'));
+  if (el.platformYt) el.platformYt.addEventListener('click', () => requestPlatform('youtube'));
   if (el.platformYtm) el.platformYtm.addEventListener('click', () => setPlatform('ytmusic'));
   if (el.platformSc) el.platformSc.addEventListener('click', () => setPlatform('soundcloud'));
 
@@ -17573,7 +17702,7 @@ function bindCoverHoldZoom(wrapEl) {
       opt.addEventListener('click', (e) => {
         e.stopPropagation();
         const val = opt.dataset.value;
-        setPlatform(val);
+        requestPlatform(val);
         engineApiDropdown.classList.remove('open');
       });
     });
@@ -17600,23 +17729,13 @@ function bindCoverHoldZoom(wrapEl) {
     }
   }
 
-  const btnShowYtPlatform = document.getElementById('btn-show-yt-platform');
-  if (btnShowYtPlatform) {
-    btnShowYtPlatform.classList.toggle('active', showYtPlatform);
-    btnShowYtPlatform.addEventListener('click', () => {
-      const next = !btnShowYtPlatform.classList.contains('active');
-      btnShowYtPlatform.classList.toggle('active', next);
-      localStorage.setItem('jeem_show_yt_platform', next ? '1' : '0');
-      document.body.classList.toggle('show-yt-platform', next);
-      if (next) {
-        showToast('Warning: YouTube may return non-music videos and load slower than YouTube Music', 'warning', 5000);
-      } else if (state.platform === 'youtube') {
-        setPlatform('ytmusic', false);
-      }
-      updateEngineWidthVar();
-      setTimeout(updateEngineWidthVar, 350);
-    });
-  }
+  const btnAboutAuthor = document.getElementById('btn-about-author');
+  if (btnAboutAuthor) btnAboutAuthor.addEventListener('click', (e) => {
+    e.preventDefault();
+    const url = 'https://github.com/Surse231';
+    if (window.electronAPI && window.electronAPI.openExternal) window.electronAPI.openExternal(url);
+    else window.open(url, '_blank');
+  });
 
   const btnCompactEngineBtns = document.getElementById('btn-compact-engine-btns');
   const isCompactEngine = localStorage.getItem('jeem_compact_engine_btns') === '1';
@@ -17770,6 +17889,31 @@ function bindCoverHoldZoom(wrapEl) {
       if (state.currentTrack) toggleFavoriteTrack(state.currentTrack);
     });
   }
+
+  const btnLyricsLike = document.getElementById('btn-lyrics-like');
+  if (btnLyricsLike) btnLyricsLike.addEventListener('click', () => {
+    if (!state.currentTrack) return;
+    // during My Vibe a like also tunes the stream
+    if (state.myWaveActive && typeof window.jeemWaveLike === 'function') window.jeemWaveLike();
+    else toggleFavoriteTrack(state.currentTrack);
+    syncLyricsLikeButtons();
+  });
+  const btnTvkLike = document.getElementById('btn-tvk-like');
+  if (btnTvkLike) btnTvkLike.addEventListener('click', () => {
+    if (!state.currentTrack) return;
+    if (state.myWaveActive && typeof window.jeemWaveLike === 'function') window.jeemWaveLike();
+    else toggleFavoriteTrack(state.currentTrack);
+    syncLyricsLikeButtons();
+  });
+  const btnTvkDislike = document.getElementById('btn-tvk-dislike');
+  if (btnTvkDislike) btnTvkDislike.addEventListener('click', () => {
+    if (state.myWaveActive && typeof window.jeemWaveDislike === 'function') window.jeemWaveDislike();
+  });
+  const btnLyricsDislike = document.getElementById('btn-lyrics-dislike');
+  if (btnLyricsDislike) btnLyricsDislike.addEventListener('click', () => {
+    if (state.myWaveActive && typeof window.jeemWaveDislike === 'function') window.jeemWaveDislike();
+  });
+  if (el.nativeAudio) ['playing', 'loadedmetadata'].forEach(ev => el.nativeAudio.addEventListener(ev, syncLyricsLikeButtons));
 
   if (el.btnClearHistory) {
     el.btnClearHistory.addEventListener('click', () => {
@@ -18186,6 +18330,12 @@ function bindCoverHoldZoom(wrapEl) {
       e.stopPropagation();
       const tempoTab = document.querySelector('.audio-tab[data-audio-tab="tempo"]') || document.querySelector('.audio-tab');
       if (tempoTab) tempoTab.click();
+      // opening the audio editor closes the queue panel (the click is stopped here, so the panel would never hear about it)
+      const queuePanel = document.getElementById('np-queue-panel');
+      if (queuePanel && queuePanel.classList.contains('open') && !(audioCard && audioCard.classList.contains('connected-editor'))) {
+        const queueBtn = document.getElementById('btn-toggle-queue-panel');
+        if (queueBtn) queueBtn.click();
+      }
       toggleConnectedAudio();
       refreshStacks();
     });
@@ -23048,7 +23198,10 @@ function bindCoverHoldZoom(wrapEl) {
     lyrics: { code: 'KeyL', ctrl: false, shift: false, alt: false },
     karaoke: { code: 'KeyF', ctrl: false, shift: false, alt: false },
     miniPlayer: { code: 'KeyP', ctrl: false, shift: false, alt: false },
-    search: { code: 'KeyK', ctrl: true, shift: false, alt: false }
+    search: { code: 'KeyK', ctrl: true, shift: false, alt: false },
+    likeTrack: { code: 'KeyL', ctrl: true, shift: false, alt: false },
+    dislikeTrack: { code: 'KeyL', ctrl: true, shift: true, alt: false },
+    queue: { code: 'KeyQ', ctrl: false, shift: false, alt: false }
   };
   try { localStorage.removeItem('jeem_keyboard_shortcuts'); } catch (_) {}
 
@@ -23101,6 +23254,16 @@ function bindCoverHoldZoom(wrapEl) {
     } else if (action === 'search' && el.searchInput) {
       el.searchInput.focus();
       el.searchInput.select();
+    } else if (action === 'likeTrack') {
+      if (state.currentTrack) {
+        if (state.myWaveActive && typeof window.jeemWaveLike === 'function') window.jeemWaveLike();
+        else toggleFavoriteTrack(state.currentTrack);
+      }
+    } else if (action === 'dislikeTrack') {
+      if (state.myWaveActive && typeof window.jeemWaveDislike === 'function') window.jeemWaveDislike();
+    } else if (action === 'queue') {
+      const queueBtn = document.getElementById('btn-toggle-queue-panel');
+      if (queueBtn) queueBtn.click();
     }
     return true;
   }
@@ -27023,28 +27186,43 @@ function bindCoverHoldZoom(wrapEl) {
     return out;
   }
 
-  async function fetchWaveTracks(limit = 12) {
+  const WAVE_AI_KEY = 'jeem_wave_ai';
+  function getWaveAi() {
+    const v = safeJson(WAVE_AI_KEY, null);
+    return v && v.key ? { provider: v.provider === 'groq' ? 'groq' : 'gemini', key: String(v.key).trim() } : null;
+  }
+
+  async function fetchWaveTracks(limit = 12, opts = {}) {
+    const settings = opts.settings || getWaveSettings();
     const profile = await computeTasteProfile();
     const baseAvoid = typeof getWaveAvoid === 'function' ? getWaveAvoid() : { ids: [], keys: [], artists: [] };
     const ids = new Set(Array.isArray(baseAvoid.ids) ? baseAvoid.ids : []);
     (state.queue || []).forEach(t => { if (t && t.id) ids.add(String(t.id)); });
+    const extra = opts.extraAvoid || {};
+    (extra.ids || []).forEach(i => { if (i) ids.add(String(i)); });
+    const keys = [...(baseAvoid.keys || []), ...(extra.keys || [])];
+    const artists = [...(baseAvoid.artists || []), ...(extra.artists || [])];
+    const disliked = getWaveSkips().filter(x => x && x.w >= 2 && x.artist).slice(-20).map(x => `${x.artist}${x.title ? ' - ' + x.title : ''}`);
     const res = await fetch(`http://127.0.0.1:${state.serverPort}/api/vibe`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         history: (state.history || []).slice(0, 30),
-        favorites: (state.favorites || []).slice(0, 25),
+        favorites: (state.favorites || []).slice(0, 80),
+        likedNow: opts.likedNow || [],
+        dislikedList: disliked,
         limit,
         clientProfile: profile,
         seeds: profile.seeds,
-        avoid: { ids: Array.from(ids), keys: baseAvoid.keys || [], artists: baseAvoid.artists || [] },
-        settings: getWaveSettings(),
+        avoid: { ids: Array.from(ids), keys, artists },
+        settings,
         region: detectUserMusicRegion(),
-        knownArtists: waveKnownArtists()
+        knownArtists: waveKnownArtists(),
+        ai: getWaveAi()
       })
     });
     const data = await res.json();
-    const skipKeys = new Set((baseAvoid.keys || []).map(k => String(k).toLowerCase()));
+    const skipKeys = new Set(keys.map(k => String(k).toLowerCase()));
     const fresh = ((data && data.tracks) || []).filter(t => {
       const k = typeof getTrackNormalizedKey === 'function' ? getTrackNormalizedKey(t.artist, t.title) : '';
       return !(k && skipKeys.has(String(k).toLowerCase())) && !(state.queue || []).some(q => isSameTrack(q, t));
@@ -27052,24 +27230,66 @@ function bindCoverHoldZoom(wrapEl) {
     return waveMixFavorites(fresh);
   }
 
+  /* Answers prepared in advance: what the stream would be after a dislike, or with another setting. A choice then takes effect at once. */
+  const waveScenarios = new Map();
+  function waveScenario(key, producer) {
+    const hit = waveScenarios.get(key);
+    if (hit && Date.now() - hit.ts < 150000) return hit;
+    const entry = { ts: Date.now(), tracks: null };
+    entry.promise = Promise.resolve().then(producer).then(tracks => {
+      entry.tracks = Array.isArray(tracks) ? tracks : [];
+      if (entry.tracks.length) prepareStreams(entry.tracks.slice(0, 3));
+      return entry.tracks;
+    }).catch(() => { entry.tracks = []; return []; });
+    waveScenarios.set(key, entry);
+    if (waveScenarios.size > 10) waveScenarios.delete(waveScenarios.keys().next().value);
+    return entry;
+  }
+
+  function waveTrackId(track) {
+    return ((typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(track) : '') || (track && track.id) || '');
+  }
+
+  function waveDislikeAvoid(track) {
+    const key = typeof getTrackNormalizedKey === 'function' ? getTrackNormalizedKey(track.artist, track.title) : '';
+    return { ids: [track.id], keys: key ? [key] : [], artists: [track.artist] };
+  }
+
+  function dropArtistTracks(tracks, artist) {
+    const bad = String(artist || '').toLowerCase().split(/[,;&]/).map(a => a.trim()).filter(Boolean);
+    if (!bad.length) return tracks;
+    const kept = tracks.filter(t => !bad.some(b => String(t.artist || '').toLowerCase().includes(b)));
+    return kept.length ? kept : tracks;
+  }
+
+  /* Called while a track of the stream plays: get the answer to a dislike ready, and the streams of what comes next. */
+  let wavePrewarmTimer = 0;
+  function prewarmWaveChoices() {
+    clearTimeout(wavePrewarmTimer);
+    if (!state.myWaveActive || !state.currentTrack) return;
+    wavePrewarmTimer = setTimeout(() => {
+      const cur = state.currentTrack;
+      if (!state.myWaveActive || !cur) return;
+      prepareStreams((state.queue || []).slice((state.queueIndex || 0) + 1, (state.queueIndex || 0) + 4));
+      waveScenario('dislike:' + waveTrackId(cur), () =>
+        fetchWaveTracks(12, { extraAvoid: waveDislikeAvoid(cur) }).then(tr => dropArtistTracks(tr, cur.artist)));
+    }, 2500);
+  }
+
   /* Throw away the tracks that have not played yet and pick new ones with the latest like or dislike taken into account. */
   let waveRebuildToken = 0;
   let waveRebuildBackup = null;
   let waveRebuildPlayNext = false;
-  async function rebuildWaveQueue(thenPlayNext, dropArtist) {
+  async function rebuildWaveQueue(thenPlayNext, dropArtist, fetchOpts) {
     const token = ++waveRebuildToken;
     if (!waveRebuildBackup) waveRebuildBackup = state.queue.slice();
     if (thenPlayNext) waveRebuildPlayNext = true;
     const keep = Math.max(0, (state.queueIndex || 0) + 1);
     state.queue = waveRebuildBackup.slice(0, keep);
     let tracks = [];
-    try { tracks = await fetchWaveTracks(12); } catch (_) {}
+    try { tracks = await fetchWaveTracks(12, fetchOpts || {}); } catch (_) {}
     if (token !== waveRebuildToken) return;
-    if (dropArtist) {
-      const bad = String(dropArtist).toLowerCase().split(/[,;&]/).map(a => a.trim()).filter(Boolean);
-      const kept = tracks.filter(t => !bad.some(b => String(t.artist || '').toLowerCase().includes(b)));
-      if (kept.length) tracks = kept;
-    }
+    if (dropArtist) tracks = dropArtistTracks(tracks, dropArtist);
     if (tracks.length && state.myWaveActive) state.queue.push(...tracks);
     else state.queue = waveRebuildBackup;
     const play = waveRebuildPlayNext;
@@ -27081,8 +27301,68 @@ function bindCoverHoldZoom(wrapEl) {
     if (play) playNext();
   }
 
+  /* Put prepared tracks after the current one and, when asked, start the first of them right away. */
+  function applyWaveTracks(tracks, playNow) {
+    waveRebuildToken++;
+    waveRebuildBackup = null;
+    waveRebuildPlayNext = false;
+    const keep = Math.max(0, (state.queueIndex || 0) + 1);
+    state.queue = state.queue.slice(0, keep).concat(tracks);
+    updateQueueBadge();
+    if (typeof renderQueueView === 'function') renderQueueView();
+    if (typeof window.refreshQueuePanel === 'function') window.refreshQueuePanel();
+    if (playNow) playNext();
+  }
+
+  function waveDislikeCurrent() {
+    const cur = state.currentTrack;
+    if (!cur) return;
+    recordWaveSkip(cur, 2);
+    state._skipRecordedFor = waveTrackId(cur);
+    showToast(t('Got it, fewer tracks like this'));
+    if (!state.myWaveActive) { playNext(); return; }
+    const prepared = waveScenarios.get('dislike:' + waveTrackId(cur));
+    if (prepared && prepared.tracks && prepared.tracks.length && Date.now() - prepared.ts < 180000) {
+      waveScenarios.delete('dislike:' + waveTrackId(cur));
+      applyWaveTracks(prepared.tracks, true);
+      return;
+    }
+    // No prepared answer: the next track that is already in the queue (and is not by the same artist) plays at once, the rest is rebuilt behind it.
+    const idx = state.queueIndex || 0;
+    const head = state.queue.slice(0, idx + 1);
+    const bad = String(cur.artist || '').toLowerCase();
+    const rest = state.queue.slice(idx + 1).filter(q => !bad || !String(q.artist || '').toLowerCase().includes(bad));
+    if (rest.length) {
+      state.queue = head.concat(rest);
+      playNext();
+      rebuildWaveQueue(false, cur.artist, { extraAvoid: waveDislikeAvoid(cur) });
+    } else {
+      rebuildWaveQueue(true, cur.artist, { extraAvoid: waveDislikeAvoid(cur) });
+    }
+  }
+
+  function waveLikeCurrent() {
+    const cur = state.currentTrack;
+    if (!cur) return;
+    const wasLiked = state.favorites.some(f => isSameTrack(f, cur));
+    toggleFavoriteTrack(cur);
+    renderWavePage();
+    if (!wasLiked && state.myWaveActive) rebuildWaveQueue(false, null, { likedNow: [cur] });
+  }
+  window.jeemWaveLike = waveLikeCurrent;
+  window.jeemWaveDislike = waveDislikeCurrent;
+
   function isWavePlaying() {
     return !!state.myWaveActive && !!state.currentTrack && !!el.nativeAudio && !el.nativeAudio.paused;
+  }
+
+  function waveSettingsKey(settings) {
+    return 'set:' + JSON.stringify(settings) + ':' + detectUserMusicRegion();
+  }
+
+  /* Pick the tracks for a setting before it is chosen (the pointer is over it); the choice then starts at once. */
+  function prepareWaveSettings(settings) {
+    return waveScenario(waveSettingsKey(settings), () => fetchWaveTracks(12, { settings }));
   }
 
   async function startWave() {
@@ -27092,7 +27372,16 @@ function bindCoverHoldZoom(wrapEl) {
     try {
       const prevQueue = state.queue;
       state.queue = [];
-      const tracks = await fetchWaveTracks(12).catch(() => []);
+      const key = waveSettingsKey(getWaveSettings());
+      const prepared = waveScenarios.get(key);
+      waveScenarios.delete(key);
+      let tracks = [];
+      if (prepared && Date.now() - prepared.ts < 150000) {
+        tracks = await prepared.promise;
+        // the prepared tracks were chosen while another stream may have been playing: drop the ones that are in the old queue now
+        tracks = tracks.filter(tr => !prevQueue.slice(0, 1).some(q => isSameTrack(q, tr)));
+      }
+      if (!tracks.length) tracks = await fetchWaveTracks(12).catch(() => []);
       if (!tracks.length) {
         state.queue = prevQueue;
         showToast(t('Could not build your stream, try other settings'), 'error');
@@ -27126,6 +27415,63 @@ function bindCoverHoldZoom(wrapEl) {
       </div>`;
   }
 
+  function renderWaveAiGroup() {
+    const ai = safeJson(WAVE_AI_KEY, null) || {};
+    const provider = ai.provider === 'groq' ? 'groq' : 'gemini';
+    return `
+      <div class="wave-group">
+        <div class="wave-group-title">${escapeHtml(t('Smart picks (optional AI)'))}</div>
+        <div class="wave-ai-row">
+          <select class="wave-select" id="wave-ai-provider" aria-label="${escapeHtml(t('Smart picks (optional AI)'))}">
+            <option value="gemini"${provider === 'gemini' ? ' selected' : ''}>Google Gemini</option>
+            <option value="groq"${provider === 'groq' ? ' selected' : ''}>Groq</option>
+          </select>
+          <input type="password" class="wave-input" id="wave-ai-key" autocomplete="off" spellcheck="false" placeholder="${escapeHtml(t('Paste a free API key'))}" value="${escapeHtml(ai.key || '')}">
+          <button type="button" class="btn-outline-pill" id="btn-wave-ai-check"><span>${escapeHtml(t('Check'))}</span></button>
+        </div>
+        <div class="wave-hint" id="wave-ai-status">${escapeHtml(t('With a key an AI model sorts the candidates for you. Without it My Vibe works on its own.'))}
+          <a href="#" data-ai-link="gemini">aistudio.google.com/apikey</a> · <a href="#" data-ai-link="groq">console.groq.com/keys</a></div>
+      </div>`;
+  }
+
+  function bindWaveAiGroup(box) {
+    const prov = box.querySelector('#wave-ai-provider');
+    const keyIn = box.querySelector('#wave-ai-key');
+    const status = box.querySelector('#wave-ai-status');
+    const check = box.querySelector('#btn-wave-ai-check');
+    if (!prov || !keyIn) return;
+    const save = () => {
+      const key = keyIn.value.trim();
+      try {
+        if (key) localStorage.setItem(WAVE_AI_KEY, JSON.stringify({ provider: prov.value, key }));
+        else localStorage.removeItem(WAVE_AI_KEY);
+      } catch (_) {}
+    };
+    keyIn.addEventListener('change', save);
+    prov.addEventListener('change', save);
+    box.querySelectorAll('[data-ai-link]').forEach(a => a.addEventListener('click', (e) => {
+      e.preventDefault();
+      const url = a.dataset.aiLink === 'groq' ? 'https://console.groq.com/keys' : 'https://aistudio.google.com/apikey';
+      if (window.electronAPI && window.electronAPI.openExternal) window.electronAPI.openExternal(url);
+      else window.open(url, '_blank');
+    }));
+    if (check) check.addEventListener('click', async () => {
+      save();
+      if (!keyIn.value.trim()) { status.textContent = t('Paste a free API key'); return; }
+      status.textContent = t('Checking...');
+      try {
+        const res = await fetch(`http://127.0.0.1:${state.serverPort}/api/ai-test`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: prov.value, key: keyIn.value.trim() })
+        });
+        const j = await res.json();
+        status.textContent = j && j.success ? t('The key works. AI picks are on.') : t('The key was not accepted') + (j && j.error ? ': ' + String(j.error).slice(0, 120) : '');
+      } catch (_) {
+        status.textContent = t('Could not reach the service');
+      }
+    });
+  }
+
   function applyWaveRegionChange() {
     ['jeem_trending_cache', 'jeem_trending_region'].forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
     try { if (window.HomeCache && window.HomeCache.store) delete window.HomeCache.store['home_trending']; } catch (_) {}
@@ -27142,7 +27488,7 @@ function bindCoverHoldZoom(wrapEl) {
       <div class="wave-group">
         <div class="wave-group-title">${escapeHtml(t(g.title))}</div>
         <div class="wave-chips">${g.options.map(([val, label]) => `<button type="button" class="wave-chip${cur[g.key] === val ? ' active' : ''}" data-group="${g.key}" data-val="${val}">${escapeHtml(t(label))}</button>`).join('')}</div>
-      </div>`).join('') + renderWaveRegionGroup() + `<button type="button" class="btn-outline-pill wave-reset" id="btn-wave-reset"><span>${escapeHtml(t('Reset'))}</span></button>`;
+      </div>`).join('') + renderWaveRegionGroup() + renderWaveAiGroup() + `<button type="button" class="btn-outline-pill wave-reset" id="btn-wave-reset"><span>${escapeHtml(t('Reset'))}</span></button>`;
     const regionSel = box.querySelector('#wave-region-select');
     if (regionSel) regionSel.addEventListener('change', () => {
       try {
@@ -27154,7 +27500,17 @@ function bindCoverHoldZoom(wrapEl) {
       if (state.myWaveActive) startWave();
       else renderWavePage();
     });
+    const settingsAfterToggle = (chip) => {
+      const next = getWaveSettings();
+      next[chip.dataset.group] = next[chip.dataset.group] === chip.dataset.val ? '' : chip.dataset.val;
+      return next;
+    };
     box.querySelectorAll('.wave-chip').forEach(chip => {
+      let hoverTimer = 0;
+      const warm = () => { clearTimeout(hoverTimer); hoverTimer = setTimeout(() => prepareWaveSettings(settingsAfterToggle(chip)), 180); };
+      chip.addEventListener('mouseenter', warm);
+      chip.addEventListener('focus', warm);
+      chip.addEventListener('mouseleave', () => clearTimeout(hoverTimer));
       chip.addEventListener('click', () => {
         const s = getWaveSettings();
         s[chip.dataset.group] = s[chip.dataset.group] === chip.dataset.val ? '' : chip.dataset.val;
@@ -27164,6 +27520,7 @@ function bindCoverHoldZoom(wrapEl) {
         else renderWavePage();
       });
     });
+    bindWaveAiGroup(box);
     const reset = box.querySelector('#btn-wave-reset');
     if (reset) reset.addEventListener('click', () => {
       try { localStorage.removeItem(WAVE_SETTINGS_KEY); localStorage.removeItem('jeem_region_override'); } catch (_) {}
@@ -27195,13 +27552,31 @@ function bindCoverHoldZoom(wrapEl) {
       : '<path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11-6.86a1 1 0 0 0 0-1.72l-11-6.86A1 1 0 0 0 8 5.14z"/>';
     const acts = document.getElementById('wave-track-actions');
     if (acts) acts.classList.toggle('hidden', !active);
+    if (typeof window.syncLyricsLikeButtons === 'function') window.syncLyricsLikeButtons();
+    const coverBg = document.getElementById('wave-cover-bg');
+    if (coverBg) {
+      const url = active && typeof getTrackThumbUrl === 'function' ? getTrackThumbUrl(state.currentTrack) : '';
+      if (url && coverBg.dataset.src !== url) {
+        coverBg.dataset.src = url;
+        const img = new Image();
+        img.onload = () => { coverBg.style.backgroundImage = `url("${url}")`; coverBg.classList.add('on'); };
+        img.onerror = () => { coverBg.classList.remove('on'); };
+        img.src = url;
+      } else if (!url) {
+        coverBg.dataset.src = '';
+        coverBg.classList.remove('on');
+      }
+    }
     const likeBtn = document.getElementById('btn-wave-like');
     if (likeBtn && active) likeBtn.classList.toggle('active', state.favorites.some(f => isSameTrack(f, state.currentTrack)));
   }
 
   function initWave() {
     const nav = document.getElementById('nav-wave');
-    if (nav) nav.addEventListener('click', () => switchView('wave'));
+    if (nav) nav.addEventListener('click', () => {
+      switchView('wave');
+      if (!state.myWaveActive) setTimeout(() => prepareWaveSettings(getWaveSettings()), 300);
+    });
     const play = document.getElementById('btn-wave-play');
     if (play) play.addEventListener('click', () => {
       if (waveStarting) return;
@@ -27216,24 +27591,13 @@ function bindCoverHoldZoom(wrapEl) {
       if (open) renderWaveSettings();
     });
     const like = document.getElementById('btn-wave-like');
-    if (like) like.addEventListener('click', () => {
-      if (!state.currentTrack) return;
-      const wasLiked = state.favorites.some(f => isSameTrack(f, state.currentTrack));
-      toggleFavoriteTrack(state.currentTrack);
-      renderWavePage();
-      if (!wasLiked && state.myWaveActive) rebuildWaveQueue(false);
-    });
+    if (like) like.addEventListener('click', waveLikeCurrent);
     const dislike = document.getElementById('btn-wave-dislike');
-    if (dislike) dislike.addEventListener('click', () => {
-      if (!state.currentTrack) return;
-      recordWaveSkip(state.currentTrack, 2);
-      state._skipRecordedFor = (typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(state.currentTrack) : '') || state.currentTrack.id;
-      showToast(t('Got it, fewer tracks like this'));
-      if (state.myWaveActive) rebuildWaveQueue(true, state.currentTrack.artist); else playNext();
-    });
+    if (dislike) dislike.addEventListener('click', waveDislikeCurrent);
     if (el.nativeAudio) ['play', 'playing', 'pause', 'ended', 'loadedmetadata'].forEach(ev => el.nativeAudio.addEventListener(ev, () => {
       if (state.currentView === 'wave') renderWavePage();
     }));
+    if (el.nativeAudio) el.nativeAudio.addEventListener('playing', prewarmWaveChoices);
   }
   initWave();
 
@@ -29027,6 +29391,16 @@ function bindCoverHoldZoom(wrapEl) {
     const cleanId = String(trackId).replace(/[^a-zA-Z0-9_-]/g, '_');
     analysisCache.set(cleanId, analysis);
     try {
+      // only the analysis of the latest tracks is kept in the saved state; it is made again when needed
+      let order = [];
+      try { order = JSON.parse(localStorage.getItem('jeem_analysis_order') || '[]'); } catch (_) {}
+      order = order.filter(x => x !== cleanId);
+      order.push(cleanId);
+      while (order.length > 30) {
+        const old = order.shift();
+        localStorage.removeItem(`jeem_audio_analysis_${old}`);
+      }
+      localStorage.setItem('jeem_analysis_order', JSON.stringify(order));
       localStorage.setItem(`jeem_audio_analysis_${cleanId}`, JSON.stringify(analysis));
       fetch(`http://127.0.0.1:${state.serverPort}/api/track-analysis`, {
         method: 'POST',
@@ -29237,7 +29611,10 @@ function bindCoverHoldZoom(wrapEl) {
   function getWaveSkips() {
     try {
       const raw = localStorage.getItem(WAVE_SKIPS_KEY);
-      return Array.isArray(JSON.parse(raw)) ? JSON.parse(raw) : [];
+      const all = Array.isArray(JSON.parse(raw)) ? JSON.parse(raw) : [];
+      // a dislike or a skip is remembered for a month
+      const limit = Date.now() - 30 * 86400000;
+      return all.filter(x => x && (!x.t || x.t > limit));
     } catch (e) {
       return [];
     }
@@ -29249,7 +29626,7 @@ function bindCoverHoldZoom(wrapEl) {
     const artist = (track.artist || '').trim();
     if (!key && !artist) return;
     const skips = getWaveSkips();
-    skips.push({ key, artist, t: Date.now(), w: weight || 1 });
+    skips.push({ key, artist, title: (track.title || '').trim(), t: Date.now(), w: weight || 1 });
     if (skips.length > 200) {
       skips.splice(0, skips.length - 200);
     }
@@ -29821,35 +30198,48 @@ function bindCoverHoldZoom(wrapEl) {
     el.classList.toggle('fade-overflow', over);
   }
 
+  /* All the measurements first, all the changes after: one layout instead of one per element. */
+  function updateTextFades(els) {
+    const over = new Array(els.length);
+    for (let i = 0; i < els.length; i++) over[i] = !!els[i] && els[i].scrollWidth > els[i].clientWidth + 1;
+    for (let i = 0; i < els.length; i++) {
+      const e = els[i];
+      if (!e) continue;
+      const on = over[i];
+      if (e.classList.contains('is-overflowing') === on && e.classList.contains('fade-end') === on && e.classList.contains('fade-overflow') === on) continue;
+      e.classList.toggle('fade-end', on);
+      e.classList.toggle('is-overflowing', on);
+      e.classList.toggle('fade-overflow', on);
+    }
+  }
+
   function refreshOverflowFades(root = document) {
     requestAnimationFrame(() => {
       const target = root || document;
-      if (target.nodeType === 1 && target.matches && target.matches(titleOverflowSelector)) {
-        updateTextFade(target);
-      }
-      (target.querySelectorAll ? target : document).querySelectorAll(titleOverflowSelector).forEach(updateTextFade);
+      const list = [];
+      if (target.nodeType === 1 && target.matches && target.matches(titleOverflowSelector)) list.push(target);
+      (target.querySelectorAll ? target : document).querySelectorAll(titleOverflowSelector).forEach(e => list.push(e));
+      updateTextFades(list);
     });
   }
 
   const titleOverflowObserver = (typeof ResizeObserver !== 'undefined') ? new ResizeObserver((entries) => {
-    for (let i = 0; i < entries.length; i++) {
-      updateTextFade(entries[i].target);
-    }
+    updateTextFades(entries.map(en => en.target));
   }) : null;
+
+  function unobserveTitlesUnder(root) {
+    if (!root || !root.querySelectorAll || !titleOverflowObserver) return;
+    const els = root.querySelectorAll(titleOverflowSelector);
+    for (let i = 0; i < els.length; i++) titleOverflowObserver.unobserve(els[i]);
+  }
 
   function observeTitlesUnder(root) {
     if (!root) return;
-    if (root.matches && root.matches(titleOverflowSelector)) {
-      updateTextFade(root);
-      if (titleOverflowObserver) titleOverflowObserver.observe(root);
-    }
-    if (root.querySelectorAll) {
-      const els = root.querySelectorAll(titleOverflowSelector);
-      for (let i = 0; i < els.length; i++) {
-        updateTextFade(els[i]);
-        if (titleOverflowObserver) titleOverflowObserver.observe(els[i]);
-      }
-    }
+    const list = [];
+    if (root.matches && root.matches(titleOverflowSelector)) list.push(root);
+    if (root.querySelectorAll) root.querySelectorAll(titleOverflowSelector).forEach(e => list.push(e));
+    updateTextFades(list);
+    if (titleOverflowObserver) for (let i = 0; i < list.length; i++) titleOverflowObserver.observe(list[i]);
   }
 
   let titleOverflowBatch = new Set();
@@ -31370,7 +31760,11 @@ function bindCoverHoldZoom(wrapEl) {
       if (seen.has(k)) return false;
       seen.add(k);
       return true;
-    }).sort((a, b) => Date.parse(b.releaseDate) - Date.parse(a.releaseDate)).slice(0, 20);
+    }).sort((a, b) => Date.parse(b.releaseDate) - Date.parse(a.releaseDate)).filter((r, i, all) => {
+      // only the newest release of each artist
+      const who = String(r.artist || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+      return all.findIndex(x => String(x.artist || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '') === who) === i;
+    }).slice(0, 20);
   }
 
   function renderNewReleaseCards(row, releases) {

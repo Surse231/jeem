@@ -69,7 +69,14 @@ async fn handle(State(ctx): State<Arc<Ctx>>, req: Request) -> Response {
     let resp = if path == "/__file" {
         local::serve_file(&ctx, &query, &parts.headers).await
     } else if let Some(cmd) = path.strip_prefix("/__ipc/") {
-        let bytes = axum::body::to_bytes(body, 64 * 1024 * 1024).await.unwrap_or_default();
+        // the whole saved state of the app travels in one request, so the limit is generous (and a refusal is never silent)
+        let bytes = match axum::body::to_bytes(body, 1024 * 1024 * 1024).await {
+            Ok(b) => b,
+            Err(e) => {
+                log_line(&ctx, &format!("request to {cmd} refused: {e}"));
+                return with_cors(fail(413, "request too large"));
+            }
+        };
         ipc(&ctx, &parts, bytes, cmd).await
     } else if path.starts_with("/api/") {
         let bytes = axum::body::to_bytes(body, 64 * 1024 * 1024).await.unwrap_or_default();
@@ -146,6 +153,10 @@ async fn api(ctx: &Arc<Ctx>, parts: &Parts, q: &HashMap<String, String>, body: B
         "/api/new-releases" => {
             let names: Vec<String> = get("artists").split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
             ok(json!({ "success": true, "releases": ytm::new_releases(ctx, &names).await }))
+        }
+        "/api/ai-test" => {
+            let b: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+            ok(crate::ai::test(ctx, &b).await)
         }
         "/api/vibe" => {
             let b: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
@@ -488,6 +499,20 @@ async fn image_proxy(ctx: &Arc<Ctx>, target: &str) -> Response {
     }
 }
 
+/// One line in `jeem.log` in the data folder (what "Open logs folder" shows), for things that must not fail silently.
+pub fn log_line(ctx: &Ctx, msg: &str) {
+    use std::io::Write;
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let path = ctx.data_dir.join("jeem.log");
+    // keep the log small
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > 512 * 1024) {
+        let _ = std::fs::remove_file(&path);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "[{secs}] {msg}");
+    }
+}
+
 /* ---------- /__ipc: replacement for Electron's ipcRenderer ---------- */
 
 async fn ipc(ctx: &Arc<Ctx>, parts: &Parts, body: Bytes, cmd: &str) -> Response {
@@ -567,14 +592,25 @@ async fn ipc(ctx: &Arc<Ctx>, parts: &Parts, body: Bytes, cmd: &str) -> Response 
             .unwrap_or(Value::Null),
         "storageSaveBatch" | "storageSaveSync" => {
             let data = arg(0);
-            if data.is_object() {
+            if !data.is_object() {
+                log_line(ctx, "storage save skipped: the state was not an object");
+                json!({ "ok": false, "error": "not an object" })
+            } else {
+                let text = data.to_string();
                 let file = ctx.data_dir.join("storage.json");
                 let tmp = ctx.data_dir.join("storage.json.tmp");
-                if std::fs::write(&tmp, data.to_string()).is_ok() {
-                    let _ = std::fs::rename(&tmp, &file);
+                let mut result = json!({ "ok": true, "bytes": text.len() });
+                // write beside the file and swap, so a crash never leaves half a file; if the swap is refused, write the file itself
+                let swapped = std::fs::write(&tmp, &text).and_then(|_| std::fs::rename(&tmp, &file));
+                if let Err(e) = swapped {
+                    log_line(ctx, &format!("storage swap failed ({e}), writing the file directly"));
+                    if let Err(e2) = std::fs::write(&file, &text) {
+                        log_line(ctx, &format!("storage save failed: {e2}"));
+                        result = json!({ "ok": false, "error": e2.to_string() });
+                    }
                 }
+                result
             }
-            json!(true)
         }
         "readCacheFile" => std::fs::read_to_string(ctx.data_dir.join("cache.json"))
             .ok()
