@@ -156,6 +156,24 @@ fn track_key(artist: &str, title: &str) -> String {
     format!("{}::{}", norm(artist), norm(title))
 }
 
+/// Key that ignores "(Official Video)", "[Remix]", "feat. ..." and similar, so another upload of a liked track is still recognised.
+fn loose_key(artist: &str, title: &str) -> String {
+    let mut t = String::new();
+    let mut depth = 0;
+    for c in title.chars() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = (depth - 1).max(0),
+            _ if depth == 0 => t.push(c),
+            _ => {}
+        }
+    }
+    let low = t.to_lowercase();
+    let cut = [" feat", " ft.", " ft ", " - "].iter().filter_map(|m| low.find(m)).min().unwrap_or(low.len());
+    let first = artist.split([',', '&', ';']).next().unwrap_or("");
+    format!("{}::{}", norm(first), norm(&low[..cut]))
+}
+
 /// Pick `n` items without repeats; heavier items are more likely.
 fn pick_weighted(rng: &mut Rng, items: &[(usize, f64)], n: usize) -> Vec<usize> {
     let mut pool: Vec<(usize, f64)> = items.to_vec();
@@ -217,6 +235,14 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
     let history = arr("history");
     let liked_now = arr("likedNow");
     let favorite_keys: HashSet<String> = favorites.iter().map(|t| track_key(s(t.get("artist")), s(t.get("title")))).collect();
+    // every liked track (the client sends all of them in "favoriteAll"): the stream never offers them as new
+    let all_liked = arr("favoriteAll");
+    let liked_loose: HashSet<String> = favorites.iter().chain(all_liked.iter()).map(|t| loose_key(s(t.get("artist")), s(t.get("title")))).collect();
+    let liked_ids: HashSet<String> = favorites.iter().chain(all_liked.iter()).map(|t| s(t.get("id")).to_lowercase()).filter(|i| !i.is_empty()).collect();
+    let is_liked = |t: &Value| -> bool {
+        liked_ids.contains(&s(t.get("id")).to_lowercase()) || liked_loose.contains(&loose_key(s(t.get("artist")), s(t.get("title"))))
+    };
+    let recent_artists: HashSet<String> = list("/recentArtists").iter().map(|a| norm(a)).collect();
 
     // Seeds: everything the listener liked (newer likes count more), what they were just given a like for, and a little of the recent history.
     let mut seeds: Vec<Value> = Vec::new();
@@ -230,8 +256,10 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
         if !seen_seed.insert(track_key(s(t.get("artist")), s(t.get("title")))) {
             return;
         }
+        // one artist with many likes must not take over the stream: each further seed of the same artist weighs less
+        let n_same = seeds.iter().filter(|x| norm(s(x.get("artist")).split([',', '&', ';']).next().unwrap_or("")) == a).count() as f64;
         seeds.push(t.clone());
-        weights.push((seeds.len() - 1, w));
+        weights.push((seeds.len() - 1, w / (1.0 + n_same * 0.7)));
     };
     for t in &liked_now {
         push_seed(t, 6.0, &mut seeds, &mut weights);
@@ -253,7 +281,19 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
     let dominant: u8 = (1..9u8).find(|k| own >= 3 && counts[*k as usize] * 10 >= own * 7).unwrap_or(0);
 
     // The radios of three seeds are the taste part of the stream.
-    let picked = pick_weighted(&mut rng, &weights, 3);
+    let mut picked: Vec<usize> = Vec::new();
+    {
+        let mut used_artists = HashSet::new();
+        let mut pool = weights.clone();
+        while picked.len() < 3 && !pool.is_empty() {
+            let i = pick_weighted(&mut rng, &pool, 1)[0];
+            pool.retain(|x| x.0 != i);
+            let a = norm(s(seeds[i].get("artist")).split([',', '&', ';']).next().unwrap_or(""));
+            if used_artists.insert(a) {
+                picked.push(i);
+            }
+        }
+    }
     let mut radio_ids: Vec<String> = Vec::new();
     for i in &picked {
         let t = &seeds[*i];
@@ -297,7 +337,7 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
                 continue;
             }
             // tracks the listener already liked are not "new"; the "Favourite" character mixes them in separately
-            if favorite_keys.contains(&key) {
+            if favorite_keys.contains(&key) || is_liked(&t) {
                 continue;
             }
             let text_all = format!("{} {}", s(t.get("title")), s(t.get("artist")));
@@ -379,7 +419,22 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
         }
     }
 
+    // Discovery: now and then (every fourth track) something outside the listener's usual artists, so that a new favourite can turn up.
+    let seed_artists: HashSet<String> = seeds.iter().map(|t| norm(s(t.get("artist")).split([',', '&', ';']).next().unwrap_or(""))).collect();
+    let mut explore: Vec<Value> = if familiarity == "favorite" || instrumental {
+        Vec::new()
+    } else {
+        if chart.is_empty() {
+            chart = ytm::yt_chart(ctx, &region).await.1;
+        }
+        chart.clone()
+    };
+    explore.retain(|t| !seed_artists.contains(&norm(s(t.get("artist")).split([',', '&', ';']).next().unwrap_or(""))));
+    rng.shuffle(&mut explore);
+    let mut ei = explore.into_iter();
+
     let mut out: Vec<Value> = Vec::new();
+    let mut deferred: Vec<Value> = Vec::new();
     let mut seen = HashSet::new();
     let mut per_artist: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let (mut ti, mut hi) = (taste.into_iter(), themed.into_iter());
@@ -391,12 +446,22 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
         }
         // With a mood or activity set, every second track comes from the themed pool.
         let from_themed = themed_only || turn % 2 == 1;
+        let from_explore = !themed_only && turn % 4 == 3;
         turn += 1;
-        let next = if from_themed { hi.next().or_else(|| ti.next()) } else { ti.next().or_else(|| hi.next()) };
+        let next = if from_explore {
+            ei.next().or_else(|| hi.next()).or_else(|| ti.next())
+        } else if from_themed {
+            hi.next().or_else(|| ti.next())
+        } else {
+            ti.next().or_else(|| hi.next())
+        };
         let Some(t) = next else { break };
         let (title, artist) = (s(t.get("title")).to_string(), s(t.get("artist")).to_string());
         let a = norm(&artist);
         if avoid_ids.contains(&s(t.get("id")).to_lowercase()) || avoid_artists.contains(&a) || known.contains(&a) || avoid_keys.contains(&track_key(&artist, &title)) {
+            continue;
+        }
+        if familiarity != "favorite" && is_liked(&t) {
             continue;
         }
         let cyr = has_cyrillic(&title) || has_cyrillic(&artist);
@@ -406,7 +471,26 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
         if !seen.insert(format!("{a}:{}", norm(&title))) {
             continue;
         }
-        let n = per_artist.entry(a).or_insert(0);
+        let first = norm(artist.split([',', '&', ';']).next().unwrap_or(""));
+        // the artist of the last few tracks is held back; if there is not enough other music, these tracks come last
+        if recent_artists.contains(&first) {
+            deferred.push(t);
+            continue;
+        }
+        let n = per_artist.entry(first).or_insert(0);
+        if *n >= 1 {
+            deferred.push(t);
+            continue;
+        }
+        *n += 1;
+        out.push(t);
+    }
+    for t in deferred {
+        if out.len() >= limit {
+            break;
+        }
+        let first = norm(s(t.get("artist")).split([',', '&', ';']).next().unwrap_or(""));
+        let n = per_artist.entry(first).or_insert(0);
         if *n >= 2 {
             continue;
         }

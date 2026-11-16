@@ -11888,7 +11888,7 @@ body.perf .i18n-shape-box {
 
 .np-queue-panel {
   position: fixed;
-  top: 72px;
+  top: 92px;
   right: 16px;
   bottom: calc(var(--playbar-space, 120px) + 8px);
   width: 368px;
@@ -11912,6 +11912,8 @@ body.perf .i18n-shape-box {
   transition: opacity 220ms ease, transform 260ms cubic-bezier(0.2, 0, 0, 1), visibility 0s linear 260ms;
 }
 .np-queue-panel * { font-family: var(--font-family) !important; }
+/* While the queue is open the player bar rises above it, so the volume slider is drawn over the queue. */
+body:has(.np-queue-panel.open) .playbar { z-index: 10101 !important; }
 .np-queue-panel.open {
   opacity: 1;
   transform: none;
@@ -14843,6 +14845,8 @@ body:not(.mini) .titlebar-controls .titlebar-btn.close-btn {
 
 /* The track panel is opened by clicking the cover in the player bar. */
 .playbar .lyrics-btn-anchor { display: none !important; }
+/* Once the track panel is closed with its X, this button is the way to open it again. */
+body:has(#right-panel.hidden) .playbar .lyrics-btn-anchor { display: inline-flex !important; }
 
 /* Mixes and the "For you" row are switched off for now. */
 #sp-made-sec { display: none !important; }
@@ -14987,6 +14991,8 @@ body.wave-view:not(.wave-rp-open) #right-panel { display: none !important; }
 
 /* karaoke view: like and dislike beside the volume */
 #btn-tvk-karaoke-mode { right: 236px !important; }
+#btn-translate-lyrics { right: 288px !important; }
+#btn-translate-lyrics.active { background: rgba(255, 255, 255, 0.2) !important; }
 #btn-toggle-dislike.hidden { display: none !important; }
 
 /* like and dislike under the volume slider */
@@ -14994,10 +15000,9 @@ body.wave-view:not(.wave-rp-open) #right-panel { display: none !important; }
 .tvk-rate-row .tvk-rate-btn.hidden { display: none !important; }
 .tvk-rate-row .tvk-rate-btn.active { color: var(--md-sys-color-primary, #fff); }
 .tvk-rate-row .tvk-rate-btn.active svg { fill: currentColor; }
-/* karaoke button: the straight slash is drawn when karaoke is off */
-#btn-tvk-karaoke-mode .karaoke-off-slash { display: none; }
-#btn-tvk-karaoke-mode.off .karaoke-off-slash { display: block; }
-#btn-tvk-karaoke-mode.off { opacity: .75; }
+/* karaoke button: no slash; it is highlighted while karaoke is on */
+#btn-tvk-karaoke-mode .karaoke-off-slash { display: none !important; }
+#btn-tvk-karaoke-mode:not(.off) { background: rgba(255, 255, 255, 0.2) !important; }
 
 /* platform switch: one highlight that glides from one platform to the next */
 .platform-pill-switch { position: relative; }

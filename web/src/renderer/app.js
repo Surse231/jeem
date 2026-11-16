@@ -543,32 +543,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const i18nFailed = new Set();
   let i18nQueue = new Map();
   let i18nTimer = null;
-  function i18nFlush() {
-    i18nTimer = null;
-    const queued = i18nQueue;
-    i18nQueue = new Map();
-    for (const [lang, set] of queued) {
-      const texts = [...set];
-      const finish = (ok, translations) => {
-        if (!i18nSessionMap.has(lang)) i18nSessionMap.set(lang, new Map());
-        texts.forEach((s, i) => {
-          const key = lang + '\u0000' + s;
-          i18nPending.delete(key);
-          const tr = ok && translations && translations[i];
-          if (tr && tr !== s) i18nSessionMap.get(lang).set(s, tr);
-          else i18nFailed.add(key);  
-        });
-      };
-      fetch(`http://127.0.0.1:${state.serverPort}/api/i18n-batch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target: lang, texts }),
-        signal: AbortSignal.timeout(15000)
-      }).then(r => r.json())
-        .then(data => finish(!!(data && data.success), data && data.translations))
-        .catch(() => finish(false, null));
-    }
-  }
 
   function t(str) {
     if (!str || typeof str !== 'string') return str;
@@ -1539,33 +1513,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  function extractDominantColor(imgSrc) {
-    return new Promise((resolve) => {
-      if (!imgSrc) return resolve('#6750A4');
-      const img = new Image();
-      img.crossOrigin = 'Anonymous';
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        canvas.width = 10;
-        canvas.height = 10;
-        ctx.drawImage(img, 0, 0, 10, 10);
-        const data = ctx.getImageData(0, 0, 10, 10).data;
-        let r = 0, g = 0, b = 0;
-        for (let i = 0; i < data.length; i += 4) {
-          r += data[i]; g += data[i+1]; b += data[i+2];
-        }
-        const count = data.length / 4;
-        r = Math.floor(r / count);
-        g = Math.floor(g / count);
-        b = Math.floor(b / count);
-        const hex = '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
-        resolve(hex);
-      };
-      img.onerror = () => resolve('#6750A4');
-      img.src = imgSrc;
-    });
-  }
 
   let hasDrawnPausedFrame = false;
   let cachedPrimaryColor = '';
@@ -1967,37 +1914,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  function relLuminance(hex) {
-    const c = hexToRgb(hex);
-    const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
-    return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
-  }
 
-  function contrastRatio(a, b) {
-    const hi = Math.max(a, b);
-    const lo = Math.min(a, b);
-    return (hi + 0.05) / (lo + 0.05);
-  }
 
-  function computeButtonColors(accentHex, mode) {
-    const rgb = hexToRgb(accentHex);
-    const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
-    const s = hsl.s;
-    const dark = mode === 'dark';
-    let l = dark ? Math.min(74, Math.max(52, hsl.l)) : Math.min(46, Math.max(32, hsl.l));
-    const lumAt = (L) => relLuminance(hslToHex(hsl.h, s, L));
-    while (lumAt(l) > 0.42 && l > 26) l -= 1;
-    const mid = lumAt(l);
-    if (mid > 0.18 && mid < 0.23) {
-      while (lumAt(l) > 0.18 && l > 22) l -= 1;
-    }
-    const bg = hslToHex(hsl.h, s, l);
-    const bgLum = relLuminance(bg);
-    const darkText = '#1B1B1F';
-    const fg = contrastRatio(bgLum, 1) >= contrastRatio(bgLum, relLuminance(darkText)) ? '#FFFFFF' : darkText;
-    const hover = hslToHex(hsl.h, s, Math.max(0, Math.min(100, l + (dark ? 5 : -5))));
-    return { bg, fg, hover, bgLum };
-  }
 
   function applyButtonAccent(hexColor, mode, mono) {
     const root = document.documentElement.style;
@@ -2796,10 +2714,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  function openDrawer(mode, triggerBtn) {
-    openDrawerState = mode;
-    applyDrawerState(triggerBtn);
-  }
 
   function closeDrawer() {
     openDrawerState = null;
@@ -4544,7 +4458,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         svg: '<svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="#FF5500"/><path fill="#FFFFFF" d="M11.5 15.5c0 .3-.2.5-.5.5s-.5-.2-.5-.5v-5c0-.3.2-.5.5-.5s.5.2.5.5v5zm-2.2 0c0 .3-.2.5-.5.5s-.5-.2-.5-.5v-3.5c0-.3.2-.5.5-.5s.5.2.5.5v3.5zm-2.2 0c0 .3-.2.5-.5.5s-.5-.2-.5-.5v-2c0-.3.2-.5.5-.5s.5.2.5.5v2zm11.9-.5c0 1.7-1.3 3-3 3h-3.5v-6.8c.6-.5 1.4-.9 2.3-.9 1.9 0 3.5 1.4 3.8 3.3.3-.1.6-.2.9-.2 1.2 0 2.2 1 2.2 2.2z" transform="translate(-1,-1)"/></svg>'
       };
     }
-    if (p === 'youtube') {
+    // tracks found through YouTube Music keep the technical platform 'youtube' but are shown as YouTube Music
+    if (p === 'youtube' && !(track && track.source === 'ytmusic')) {
       return {
         id: 'youtube',
         name: 'YouTube',
@@ -7437,7 +7352,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       fillMain.style.setProperty('--k', k.toFixed(4));
     }
   }
-  function startGradientLoop() {}
 
   const CASCADE_CONFIG = {
     anchorY: 35,                            
@@ -7961,132 +7875,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
   });
 
-  function extract10CoverColors(imgSrc) {
-    const defaultMono = [
-      [22, 22, 26], [34, 34, 40], [48, 48, 56], [28, 28, 34], [42, 42, 50],
-      [18, 18, 22], [58, 58, 68], [30, 30, 36], [40, 40, 46], [25, 25, 30]
-    ];
-    if (!imgSrc) return Promise.resolve(defaultMono);
-    if (tvkPaletteCache.has(imgSrc)) return Promise.resolve(tvkPaletteCache.get(imgSrc));
 
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.crossOrigin = 'Anonymous';
-      img.onload = () => {
-        try {
-          const c = document.createElement('canvas');
-          c.width = 40;
-          c.height = 40;
-          const ctx = c.getContext('2d');
-          ctx.drawImage(img, 0, 0, 40, 40);
-          const data = ctx.getImageData(0, 0, 40, 40).data;
 
-          const colorful = [];
-          for (let i = 0; i < data.length; i += 8) {
-            const r = data[i], g = data[i + 1], b = data[i + 2];
-            const hsl = rgbToHsl(r, g, b);
-            if (hsl.l >= 12 && hsl.l <= 88 && hsl.s >= 18) {
-              const weight = (hsl.s / 100) * (1 - Math.abs(hsl.l - 50) / 55);
-              colorful.push({ r, g, b, h: hsl.h, s: hsl.s, l: hsl.l, weight });
-            }
-          }
-
-          if (colorful.length < 12) {
-            const monoPicked = [];
-            for (let k = 0; k < 10; k++) {
-              const v = 18 + Math.round((k / 9) * 52);
-              monoPicked.push([v, v, Math.min(255, v + 3)]);
-            }
-            tvkPaletteCache.set(imgSrc, monoPicked);
-            return resolve(monoPicked);
-          }
-
-          colorful.sort((a, b) => b.weight - a.weight);
-          const pickedHsl = [];
-          let minHueDiff = 22;
-          while (pickedHsl.length < 6 && minHueDiff >= 4) {
-            for (const p of colorful) {
-              if (pickedHsl.length >= 6) break;
-              const close = pickedHsl.some(ex => {
-                const d = Math.abs(ex.h - p.h);
-                return Math.min(d, 360 - d) < minHueDiff && Math.abs(ex.l - p.l) < 15;
-              });
-              if (!close) pickedHsl.push(p);
-            }
-            minHueDiff -= 6;
-          }
-
-          const finalRgb = [];
-          for (let i = 0; i < 10; i++) {
-            const base = pickedHsl[i % pickedHsl.length];
-            const targetS = Math.max(35, Math.min(88, base.s));
-            const lShift = (i >= pickedHsl.length) ? ((i % 2 === 0) ? 10 : -10) : 0;
-            const targetL = Math.max(22, Math.min(56, base.l + lShift));
-            const hex = hslToHex(base.h, targetS, targetL);
-            const rgb = hexToRgb(hex);
-            finalRgb.push([rgb.r, rgb.g, rgb.b]);
-          }
-
-          if (tvkPaletteCache.size >= 80) tvkPaletteCache.delete(tvkPaletteCache.keys().next().value);
-          tvkPaletteCache.set(imgSrc, finalRgb);
-          resolve(finalRgb);
-        } catch (_) {
-          resolve(defaultMono);
-        }
-      };
-      img.onerror = () => resolve(defaultMono);
-      img.src = imgSrc;
-    });
-  }
-
-  function paintTvkLayerCanvas(canvas, colors, seedOffset = 0) {
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const w = canvas.width;
-    const h = canvas.height;
-    const c0 = colors[0] || [28, 28, 32];
-    const c1 = colors[1] || c0;
-    const c2 = colors[2] || c0;
-
-    const baseGrad = ctx.createLinearGradient(0, 0, w, h);
-    baseGrad.addColorStop(0, `rgb(${c0[0]}, ${c0[1]}, ${c0[2]})`);
-    baseGrad.addColorStop(0.5, `rgb(${c1[0]}, ${c1[1]}, ${c1[2]})`);
-    baseGrad.addColorStop(1, `rgb(${c2[0]}, ${c2[1]}, ${c2[2]})`);
-    ctx.fillStyle = baseGrad;
-    ctx.fillRect(0, 0, w, h);
-
-    const positions = [
-      [0.12, 0.18], [0.85, 0.15], [0.22, 0.82], [0.82, 0.78], [0.48, 0.32],
-      [0.55, 0.68], [0.18, 0.48], [0.88, 0.46], [0.36, 0.14], [0.66, 0.88]
-    ];
-    for (let i = 0; i < 10; i++) {
-      const pos = positions[(i + seedOffset) % positions.length];
-      const cx = pos[0] * w;
-      const cy = pos[1] * h;
-      const rad = (0.48 + (i % 3) * 0.12) * Math.max(w, h);
-      const col = colors[(i + seedOffset) % colors.length] || c0;
-      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad);
-      g.addColorStop(0, `rgba(${col[0]}, ${col[1]}, ${col[2]}, 0.92)`);
-      g.addColorStop(0.45, `rgba(${col[0]}, ${col[1]}, ${col[2]}, 0.48)`);
-      g.addColorStop(1, `rgba(${col[0]}, ${col[1]}, ${col[2]}, 0)`);
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, w, h);
-    }
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
-    ctx.fillRect(0, 0, w, h);
-  }
-
-  function buildBakedTvkBlobUrl(img, cropX, cropY, cropW, cropH, blurPx, sat, bright) {
-    const size = 192;
-    const pad = Math.ceil(blurPx * 1.8);
-    const c = document.createElement('canvas');
-    c.width = size;
-    c.height = size;
-    const ctx = c.getContext('2d');
-    ctx.filter = `blur(${Math.max(1, blurPx)}px) saturate(${sat}) contrast(1.18) brightness(${bright})`;
-    ctx.drawImage(img, cropX, cropY, cropW, cropH, -pad, -pad, size + pad * 2, size + pad * 2);
-    return c.toDataURL('image/jpeg', 0.86);
-  }
 
   const tvkBaseColorCache = new Map();
 
@@ -10983,110 +10773,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       .trim();
   }
 
-  async function resolveAlbumTrack(album, t) {
-    if (!album || !t) return null;
-    if (t.url || t.platform === 'local') return t;
-    const albumId = album.id || '';
-    const trackNo = t.no != null ? t.no : 1;
-    const cacheKey = `${albumId}:${trackNo}`;
-    if (albumResolved.has(cacheKey)) {
-      return albumResolved.get(cacheKey);
-    }
 
-    const query = `${t.artist || album.artist || ''} ${t.title || ''}`.trim();
-    const platform = state.platform || 'youtube';
-    let picked = null;
-    try {
-      const url = `http://127.0.0.1:${state.serverPort}/api/search?q=${encodeURIComponent(query)}&platform=${searchPlatformParam(platform)}&limit=5`;
-      const res = await fetch(url);
-      const data = await res.json();
-      const results = (data && Array.isArray(data.tracks)) ? data.tracks.slice(0, 5) : [];
-      if (results.length > 0) {
-        const normAlbumTitle = normalizeMatchText(t.title);
-        const matching = normAlbumTitle
-          ? results.filter(cand => normalizeMatchText(cand.title).includes(normAlbumTitle))
-          : results;
-        const targetSec = t.durationMs ? t.durationMs / 1000 : null;
-
-        if (matching.length > 0) {
-          if (targetSec != null) {
-            picked = matching.find(c => {
-              const cSec = toSeconds(c.duration);
-              return cSec > 0 && Math.abs(cSec - targetSec) <= 6;
-            }) || matching[0];
-          } else {
-            picked = matching[0];
-          }
-        } else {
-          picked = results[0];
-        }
-      }
-    } catch (err) {
-      console.warn('[albums] resolve error:', err);
-    }
-
-    if (picked) {
-      albumResolved.set(cacheKey, picked);
-    }
-    return picked;
-  }
-
-  async function playAlbumFrom(album, tracks, startIndex = 0) {
-    if (!album || !tracks || !tracks.length) return;
-    const runId = ++currentAlbumPlayRunId;
-
-    const startIdx = Math.max(0, Math.min(startIndex, tracks.length - 1));
-    const firstResolved = await resolveAlbumTrack(album, tracks[startIdx]);
-
-    if (currentAlbumPlayRunId !== runId) return;
-
-    if (!firstResolved) {
-      showToast('Track not found', 'warning');
-      return;
-    }
-
-    playTrack(firstResolved, [firstResolved], 0, 'album');
-
-    const hasBusy = typeof beginBusy === 'function';
-    if (hasBusy) beginBusy('import');
-
-    try {
-      const remaining = tracks.map((t, idx) => ({ t, idx })).filter(item => item.idx !== startIdx);
-      const resolvedMap = new Map();
-      let skippedCount = 0;
-
-      await pool(remaining, 4, async (item) => {
-        if (currentAlbumPlayRunId !== runId) return;
-        const resTrack = await resolveAlbumTrack(album, item.t);
-        if (currentAlbumPlayRunId !== runId) return;
-        if (resTrack) {
-          resolvedMap.set(item.idx, resTrack);
-        } else {
-          skippedCount++;
-        }
-      });
-
-      if (currentAlbumPlayRunId !== runId) return;
-
-      for (let i = 0; i < tracks.length; i++) {
-        if (i === startIdx) continue;
-        const cand = resolvedMap.get(i);
-        if (!cand) continue;
-        const alreadyInQueue = state.queue.some(q => isSameTrack(q, cand));
-        if (!alreadyInQueue) {
-          state.queue.push(cand);
-        }
-      }
-      updateQueueBadge();
-      if (state.currentView === 'queue') renderQueueView();
-
-      if (skippedCount > 0) {
-        showToast(`${skippedCount} tracks not found`, 'warning');
-      }
-    } finally {
-      if (hasBusy) endBusy('import');
-    }
-  }
 
   let currentAlbumForFeedback = null;
   let mixFeedbackBusy = false;
@@ -11240,13 +10927,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  function setSavedAlbums(list) {
-    try {
-      localStorage.setItem('jeem_saved_albums', JSON.stringify(list));
-    } catch (_) {}
-    updateAlbumsCount();
-    if (typeof renderSidebarLibraryFeed === 'function') renderSidebarLibraryFeed();
-  }
 
   function updateAlbumsCount() {
     setNavCount(document.getElementById('albums-count'), getSavedAlbums().length);
@@ -11822,9 +11502,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-  function easeInOutCubicFn(x) {
-    return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-  }
 
   function renderM3SearchLoader(container, size = 96) {
     if (!container) return;
@@ -12460,22 +12137,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       toast.classList.add('leaving');
       setTimeout(() => { if (toast.parentNode) toast.remove(); }, 180);
     };
-  }
-  async function resolveFullTrackStreamForShare(track) {
-    if (!track) return '';
-    const port = state.serverPort || 38472;
-    try {
-      const streamInfoUrl = `http://127.0.0.1:${port}/api/stream-info?url=${encodeURIComponent(track.url || '')}&id=${encodeURIComponent(track.id || '')}&platform=${encodeURIComponent(track.platform || state.platform || 'youtube')}&title=${encodeURIComponent(track.title || '')}&artist=${encodeURIComponent(track.artist || '')}&duration=${encodeURIComponent(track.duration || 0)}&forShare=1`;
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 4500);
-      const response = await fetch(streamInfoUrl, { signal: ctrl.signal });
-      clearTimeout(timer);
-      const data = await response.json();
-      if (data && data.success && data.streamUrl && !data.streamUrl.includes('.m3u8')) {
-        return data.streamUrl;
-      }
-    } catch (_) {}
-    return '';
   }
   async function executeCopyShareLink(track) {
     if (isShareInProgress) return;
@@ -13276,14 +12937,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  function formatTrackDateAdded(ts) {
-    if (!ts || !Number.isFinite(Number(ts))) return '';
-    try {
-      return new Date(Number(ts)).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    } catch {
-      return '';
-    }
-  }
 
   function createTrackRow(track, idx, currentCanonicalId, context, tracks, container) {
       if (track && track.artist) track.artist = stripYoutubeTopic(track.artist);
@@ -13322,7 +12975,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
       const isFav = state.favorites.some(f => isSameTrack(f, track));
-      const rowThumb = getTrackThumbUrl(track);
+      const rowThumb = smallRowThumb(getTrackThumbUrl(track));
       const isAlbum = context === 'album' && !(state.currentAlbum && (state.currentAlbum.type === 'Daily Mix' || String(state.currentAlbum.id || '').startsWith('daily-mix') || String(state.currentAlbum.id || '').startsWith('dm_')));
       const index = (isAlbum && track.no) ? (Number(track.no) - 1) : idx;
       const albumArtist = (track.albumArtist || '').trim().toLowerCase();
@@ -13364,7 +13017,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       ${!isAlbum ? `
       <div class="track-row-thumb-wrap">
         <svg class="track-row-fallback-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
-        ${rowThumb ? `<img class="track-row-thumb" src="${escapeHtml(rowThumb)}" alt="" onerror="this.style.display='none'">` : ''}
+        ${rowThumb ? `<img class="track-row-thumb" src="${escapeHtml(rowThumb)}" alt="" decoding="async" onerror="this.style.display='none'">` : ''}
       </div>` : ''}
       <div class="track-row-info">
       <span class="track-row-title">${(context === 'favorites' || context === 'playlist') && isTrackPinned(track) ? '<svg class="track-pin-mark" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 3h6l-1 7 3 3v2H7v-2l3-3-1-7z"/></svg>' : ''}${titleContent}</span>
@@ -13611,7 +13264,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     const itemHeight = document.body.classList.contains('track-rows-compact') ? 56 : 64;
-    const overscan = 8;
+    const overscan = 14;
     
     function renderChunk() {
       if (!scrollParent || container._isDraggingReorder) return;
@@ -13631,24 +13284,62 @@ document.addEventListener('DOMContentLoaded', async () => {
       endIndex = Math.min(list.length, endIndex);
       
       if (container._lastStartIndex === startIndex && container._lastEndIndex === endIndex) return;
+      const oldStart = container._lastStartIndex;
+      const oldEnd = container._lastEndIndex;
       container._lastStartIndex = startIndex;
       container._lastEndIndex = endIndex;
       
       const currentCanonicalId = state.currentTrack ? getTrackCanonicalId(state.currentTrack) : '';
-      const fragment = document.createDocumentFragment();
-      for (let idx = startIndex; idx < endIndex; idx++) {
-         const track = list[idx];
-         const row = createTrackRow(track, idx, currentCanonicalId, context, list, container);
-         if (container._hasInitialRendered) row.style.animation = 'none';
-         fragment.appendChild(row);
+      const makeRows = (from, to) => {
+        const fragment = document.createDocumentFragment();
+        const rows = [];
+        for (let idx = from; idx < to; idx++) {
+          const row = createTrackRow(list[idx], idx, currentCanonicalId, context, list, container);
+          if (container._hasInitialRendered) row.style.animation = 'none';
+          fragment.appendChild(row);
+          rows.push(row);
+        }
+        return { fragment, rows };
+      };
+
+      // while scrolling only the rows that enter and leave are touched: the rest (and their loaded covers) stay as they are
+      const overlaps = container._hasInitialRendered && oldStart >= 0 && startIndex < oldEnd && endIndex > oldStart
+        && container.firstElementChild && !container.querySelector('.empty-hint');
+      if (overlaps) {
+        for (let n = container.firstElementChild; n;) {
+          const next = n.nextElementSibling;
+          const i = Number(n.dataset.trackIndex);
+          if (i < startIndex || i >= endIndex) {
+            if (typeof unobserveTitlesUnder === 'function') unobserveTitlesUnder(n);
+            n.remove();
+          }
+          n = next;
+        }
+        const added = [];
+        if (startIndex < oldStart) {
+          const a = makeRows(startIndex, Math.min(oldStart, endIndex));
+          container.insertBefore(a.fragment, container.firstChild);
+          added.push(...a.rows);
+        }
+        if (endIndex > oldEnd) {
+          const b = makeRows(Math.max(oldEnd, startIndex), endIndex);
+          container.appendChild(b.fragment);
+          added.push(...b.rows);
+        }
+        container.style.paddingTop = `${startIndex * itemHeight}px`;
+        container.style.paddingBottom = `${(list.length - endIndex) * itemHeight}px`;
+        highlightPlayingRow();
+        added.forEach(r => observeTitlesUnder(r));
+        return;
       }
-      
+
+      const full = makeRows(startIndex, endIndex);
       // the rows that leave must stop being observed, or the observer keeps every row ever shown and the list gets slower and slower
       if (typeof unobserveTitlesUnder === 'function') unobserveTitlesUnder(container);
       container.innerHTML = '';
       container.style.paddingTop = `${startIndex * itemHeight}px`;
       container.style.paddingBottom = `${(list.length - endIndex) * itemHeight}px`;
-      container.appendChild(fragment);
+      container.appendChild(full.fragment);
       container._hasInitialRendered = true;
       highlightPlayingRow();
       observeTitlesUnder(container);
@@ -15568,62 +15259,6 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
     setupSortDropdown('local-sort-dropdown', 'local-sort-trigger', 'local-sort-menu', 'local-sort-label', localSortSelect);
   }
 
-  async function importLocalFiles() {
-    if (!window.electronAPI || !window.electronAPI.importAudioFiles) return;
-    try {
-      const items = await window.electronAPI.importAudioFiles();
-      if (!items || items.length === 0) return;
-
-      await fetch(`http://127.0.0.1:${state.serverPort}/api/library-add`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items })
-      });
-
-      if (state.currentView === 'local') renderLocalView(true);
-
-      let idx = 0;
-      async function worker() {
-        while (idx < items.length) {
-          const item = items[idx++];
-          if (!item || !item.id) continue;
-          await new Promise(resolve => {
-            const url = `http://127.0.0.1:${state.serverPort}/api/library-file?id=${encodeURIComponent(item.id)}`;
-            const a = new Audio(url);
-            a.preload = 'metadata';
-            let done = false;
-            const finish = () => {
-              if (done) return;
-              done = true;
-              a.src = '';
-              resolve();
-            };
-            a.onloadedmetadata = async () => {
-              const dur = Math.round(a.duration || 0);
-              if (dur > 0) {
-                try {
-                  await fetch(`http://127.0.0.1:${state.serverPort}/api/library-update`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id: item.id, duration: dur })
-                  });
-                } catch (e) {}
-              }
-              finish();
-            };
-            a.onerror = () => finish();
-            setTimeout(finish, 5000);
-          });
-        }
-      }
-      await Promise.all([worker(), worker()]);
-
-      await renderLocalView(true);
-      showToast(`Added ${items.length} tracks`);
-    } catch (e) {
-      console.warn('Import audio files error:', e);
-    }
-  }
 
   function proxiedThumb(src) {
     if (!src || typeof src !== 'string') return '';
@@ -15641,6 +15276,14 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
       return `https://i.ytimg.com/vi/${track.id}/hqdefault.jpg`;
     }
     return '';
+  }
+
+  /* A small cover for the list rows (they show it at about 48 px): a fraction of the data of the big one, which matters on a slow connection. */
+  function smallRowThumb(url) {
+    if (!url || typeof url !== 'string') return url;
+    if (/^https?:\/\/(i\d?\.ytimg\.com|img\.youtube\.com)\//.test(url)) return url.replace(/\/(hq|sd|maxres)default(_live)?\.jpg/, '/mqdefault.jpg');
+    if (/googleusercontent\.com\//.test(url)) return url.replace(/=w\d+-h\d+/, '=w120-h120').replace(/=s\d+/, '=s120');
+    return url;
   }
 
   function renderPlaylistCover(container, playlist, size = 64) {
@@ -15803,12 +15446,6 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
     refreshOverflowFades(el.playlistsList);
   }
 
-  function getPlaylistCurrentSort(plId) {
-    if (typeof getTrackSortMode === 'function') {
-      return getTrackSortMode('playlist', plId) || (el.playlistSort ? el.playlistSort.value : 'manual');
-    }
-    return (el.playlistSort && el.playlistSort.value) || 'manual';
-  }
 
   function triggerPlaylistMenuAction(act, plId) {
     if (!act) return;
@@ -19105,7 +18742,7 @@ function bindCoverHoldZoom(wrapEl) {
       '#btn-prev svg': '<polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5" stroke="currentColor" stroke-width="2.5"></line>',
       '#btn-next svg': '<polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="2.5"></line>',
       '#btn-repeat svg': '<path d="M17 2l4 4-4 4M21 6H7a4 4 0 0 0-4 4v2M7 22l-4-4 4-4M3 18h14a4 4 0 0 0 4-4v-2"></path>',
-      '#btn-toggle-lyrics-panel svg': '<polyline points="5 7 5 4 19 4 19 7"/><line x1="12" y1="4" x2="12" y2="20"/><line x1="9" y1="20" x2="15" y2="20"/>',
+      '#btn-toggle-lyrics-panel svg': '<circle cx="12" cy="12" r="9.5"/><line x1="12" y1="11" x2="12" y2="16.5"/><line x1="12" y1="7.6" x2="12" y2="7.7"/>',
       '#btn-open-settings svg': '<line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line>',
       '#volume-icon': '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"></path>'
     },
@@ -19121,7 +18758,7 @@ function bindCoverHoldZoom(wrapEl) {
       '#btn-prev svg': '<polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5"></line>',
       '#btn-next svg': '<polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line>',
       '#btn-repeat svg': '<path d="m17 2 4 4-4 4"></path><path d="M3 11v-1a4 4 0 0 1 4-4h14"></path><path d="m7 22-4-4 4-4"></path><path d="M21 13v1a4 4 0 0 1-4 4H3"></path>',
-      '#btn-toggle-lyrics-panel svg': '<polyline points="5 7 5 4 19 4 19 7"/><line x1="12" y1="4" x2="12" y2="20"/><line x1="9" y1="20" x2="15" y2="20"/>',
+      '#btn-toggle-lyrics-panel svg': '<circle cx="12" cy="12" r="9.5"/><line x1="12" y1="11" x2="12" y2="16.5"/><line x1="12" y1="7.6" x2="12" y2="7.7"/>',
       '#btn-open-settings svg': '<line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line>',
       '#volume-icon': '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>'
     },
@@ -19137,7 +18774,7 @@ function bindCoverHoldZoom(wrapEl) {
       '#btn-prev svg': '<polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5" stroke="currentColor" stroke-width="2.5"></line>',
       '#btn-next svg': '<polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="2.5"></line>',
       '#btn-repeat svg': '<path d="M17 1l4 4-4 4H7a4 4 0 0 0-4 4v1M7 23l-4-4 4-4h10a4 4 0 0 0 4-4v-1"></path>',
-      '#btn-toggle-lyrics-panel svg': '<polyline points="5 7 5 4 19 4 19 7"/><line x1="12" y1="4" x2="12" y2="20"/><line x1="9" y1="20" x2="15" y2="20"/>',
+      '#btn-toggle-lyrics-panel svg': '<circle cx="12" cy="12" r="9.5"/><line x1="12" y1="11" x2="12" y2="16.5"/><line x1="12" y1="7.6" x2="12" y2="7.7"/>',
       '#btn-open-settings svg': '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"></path>',
       '#volume-icon': '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>'
     }
@@ -19148,7 +18785,7 @@ function bindCoverHoldZoom(wrapEl) {
     '#btn-prev svg': 'skip_previous',
     '#btn-next svg': 'skip_next',
     '#btn-repeat svg': 'repeat',
-    '#btn-toggle-lyrics-panel svg': 'title',
+    '#btn-toggle-lyrics-panel svg': 'info',
     '#btn-toggle-queue-panel svg': 'queue_music',
     '#btn-open-settings svg': 'tune',
     '#btn-sb-settings svg': 'settings',
@@ -22645,19 +22282,6 @@ function bindCoverHoldZoom(wrapEl) {
     return result;
   }
 
-  function showLangRestartDialog(lang) {
-    if (!langRestartModal) return;
-    const tLang = LANG_RESTART_TEXT[lang] || LANG_RESTART_TEXT.en;
-    const title = langRestartModal.querySelector('h3');
-    const msg = document.getElementById('lang-restart-msg');
-    const cancel = document.getElementById('btn-lang-restart-cancel');
-    const confirm = document.getElementById('btn-lang-restart-confirm');
-    if (title) title.textContent = tLang.title;
-    if (msg) msg.textContent = tLang.msg;
-    if (cancel) cancel.textContent = tLang.cancel;
-    if (confirm) confirm.textContent = tLang.restart;
-    openModal(langRestartModal);
-  }
 
   const btnCancelLangRestart = document.getElementById('btn-lang-restart-cancel');
   const btnConfirmLangRestart = document.getElementById('btn-lang-restart-confirm');
@@ -23781,32 +23405,7 @@ function bindCoverHoldZoom(wrapEl) {
       .trim();
   }
 
-  function toSeconds(dur) {
-    if (typeof dur === 'string') {
-      const trimmed = dur.trim();
-      if (/^\d+(:\d{1,2}){1,2}$/.test(trimmed)) {
-        return trimmed.split(':').map(Number).reduce((acc, n) => acc * 60 + n, 0);
-      }
-      const num = Number(trimmed);
-      if (!Number.isNaN(num) && num > 0) {
-        return num > 1000 ? Math.round(num / 1000) : Math.round(num);
-      }
-      return 0;
-    }
-    if (typeof dur === 'number' && dur > 0) {
-      return dur > 1000 ? Math.round(dur / 1000) : Math.round(dur);
-    }
-    return 0;
-  }
 
-  function splitArtists(artistStr) {
-    if (!artistStr) return [];
-    const clean = String(artistStr).replace(/\u00a0/g, ' ');
-    return clean
-      .split(/[,;&]|(?:\bfeat\.?\b)|(?:\bft\.?\b)|(?:\s+[xX]\s+)/i)
-      .map(a => normalizeImportText(a))
-      .filter(Boolean);
-  }
 
   const CYR = { а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'h', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya', і: 'i', ї: 'yi', є: 'ye', ґ: 'g' };
   function normalizeForMatch(s) {
@@ -23816,28 +23415,6 @@ function bindCoverHoldZoom(wrapEl) {
       .split('').map((c) => (CYR[c] !== undefined ? CYR[c] : c)).join('')
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
-  }
-  function tokenSimilarity(a, b) {
-    const A = new Set(normalizeForMatch(a).split(' ').filter(Boolean));
-    const B = new Set(normalizeForMatch(b).split(' ').filter(Boolean));
-    if (!A.size || !B.size) return 0;
-    let hit = 0;
-    A.forEach((t) => { if (B.has(t)) hit++; });
-    return hit / Math.max(A.size, B.size);
-  }
-  function pickBestMatch(sp, results) {
-    let best = null;
-    let bestScore = 0;
-    for (const r of results) {
-      const text = tokenSimilarity(`${sp.title} ${sp.artist}`, `${r.title} ${r.artist}`);
-      const titleSim = tokenSimilarity(sp.title, r.title);
-      const dDiff = sp.duration && r.duration ? Math.abs(sp.duration - r.duration) : 99;
-      const durationOk = dDiff <= 3;
-      const score = text + (durationOk ? 0.6 : 0) + titleSim * 0.3;
-      const accept = (durationOk && text >= 0.2) || titleSim >= 0.6 || text >= 0.55;
-      if (accept && score > bestScore) { best = r; bestScore = score; }
-    }
-    return best;
   }
 
   let activeImportToast = null;
@@ -27311,6 +26888,8 @@ function bindCoverHoldZoom(wrapEl) {
       body: JSON.stringify({
         history: (state.history || []).slice(0, 30),
         favorites: (state.favorites || []).slice(0, 80),
+        favoriteAll: (state.favorites || []).map(t => ({ id: t.id, artist: t.artist, title: t.title })),
+        recentArtists: [...(state.history || []).slice(0, 8), ...(state.queue || []).slice(Math.max(0, (state.queueIndex || 0) - 6), (state.queueIndex || 0) + 1)].map(t => t && t.artist ? String(t.artist).split(/[,&;]/)[0].trim() : '').filter(Boolean),
         likedNow: opts.likedNow || [],
         dislikedList: disliked,
         limit,
@@ -27327,7 +26906,7 @@ function bindCoverHoldZoom(wrapEl) {
     const skipKeys = new Set(keys.map(k => String(k).toLowerCase()));
     const fresh = ((data && data.tracks) || []).filter(t => {
       const k = typeof getTrackNormalizedKey === 'function' ? getTrackNormalizedKey(t.artist, t.title) : '';
-      return !(k && skipKeys.has(String(k).toLowerCase())) && !(state.queue || []).some(q => isSameTrack(q, t));
+      return !(k && skipKeys.has(String(k).toLowerCase())) && !(state.queue || []).some(q => isSameTrack(q, t)) && (settings.familiarity === 'favorite' || !isTrackFavorited(t));
     });
     return waveMixFavorites(fresh);
   }
@@ -29547,44 +29126,7 @@ function bindCoverHoldZoom(wrapEl) {
   let homeMode = localStorage.getItem('jeem_home_pane') === 'recent' ? 'recent' : 'wave';
   let isExtendingMyWave = false;
 
-  function getCachedTrackAnalysis(trackId) {
-    if (!trackId) return null;
-    const cleanId = String(trackId).replace(/[^a-zA-Z0-9_-]/g, '_');
-    if (analysisCache.has(cleanId)) return analysisCache.get(cleanId);
-    try {
-      const stored = localStorage.getItem(`jeem_audio_analysis_${cleanId}`);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        analysisCache.set(cleanId, parsed);
-        return parsed;
-      }
-    } catch (e) {}
-    return null;
-  }
 
-  function setCachedTrackAnalysis(trackId, analysis) {
-    if (!trackId || !analysis) return;
-    const cleanId = String(trackId).replace(/[^a-zA-Z0-9_-]/g, '_');
-    analysisCache.set(cleanId, analysis);
-    try {
-      // only the analysis of the latest tracks is kept in the saved state; it is made again when needed
-      let order = [];
-      try { order = JSON.parse(localStorage.getItem('jeem_analysis_order') || '[]'); } catch (_) {}
-      order = order.filter(x => x !== cleanId);
-      order.push(cleanId);
-      while (order.length > 30) {
-        const old = order.shift();
-        localStorage.removeItem(`jeem_audio_analysis_${old}`);
-      }
-      localStorage.setItem('jeem_analysis_order', JSON.stringify(order));
-      localStorage.setItem(`jeem_audio_analysis_${cleanId}`, JSON.stringify(analysis));
-      fetch(`http://127.0.0.1:${state.serverPort}/api/track-analysis`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: cleanId, analysis })
-      }).catch(() => {});
-    } catch (e) {}
-  }
 
   function getTitleOnlyKey(title) {
     let t = String(title || '').toLowerCase();
@@ -30286,10 +29828,6 @@ function bindCoverHoldZoom(wrapEl) {
     };
   }
 
-  function renderMyWaveChips(profile) {
-    const chipsContainer = document.getElementById('my-wave-chips');
-    if (chipsContainer) chipsContainer.innerHTML = '';
-  }
 
   const dominantColorsCache = new Map();
 

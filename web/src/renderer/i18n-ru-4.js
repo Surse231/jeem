@@ -91,6 +91,7 @@ window.JEEM_RU_DICT = Object.assign(window.JEEM_RU_DICT || {}, {
   "Offline library": "Офлайн-библиотека",
   "No downloaded tracks yet": "Скачанных треков пока нет",
   "Show or hide lyrics": "Показать или скрыть текст песни",
+  "Track info": "Информация о треке",
   "Like all tracks": "Лайкнуть все треки",
   "Remove all tracks from liked songs": "Убрать все треки из понравившихся",
   "Album tracks are still loading": "Треки альбома ещё загружаются",

@@ -47,7 +47,7 @@ fn track(id: &str, title: &str, artist: &str, album: &str, duration: u64, thumbn
         "duration": if duration == 0 { 180 } else { duration },
         "thumbnail": thumbnail,
         "url": format!("https://www.youtube.com/watch?v={id}"),
-        "platform": "youtube", "isExplicit": explicit
+        "platform": "youtube", "source": "ytmusic", "isExplicit": explicit
     })
 }
 
