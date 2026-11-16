@@ -92,6 +92,7 @@ window.JEEM_RU_DICT = Object.assign(window.JEEM_RU_DICT || {}, {
   "No downloaded tracks yet": "Скачанных треков пока нет",
   "Show or hide lyrics": "Показать или скрыть текст песни",
   "Track info": "Информация о треке",
+  "Timed lyrics for this version were not found, the words are shown without timing": "Текст с таймингом для этой версии не найден, слова показаны без привязки ко времени",
   "Like all tracks": "Лайкнуть все треки",
   "Remove all tracks from liked songs": "Убрать все треки из понравившихся",
   "Album tracks are still loading": "Треки альбома ещё загружаются",

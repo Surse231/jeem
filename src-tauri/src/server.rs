@@ -353,7 +353,9 @@ async fn offline_save(ctx: &Arc<Ctx>, q: &HashMap<String, String>) -> Value {
         return json!({ "success": true, "downloaded": true });
     }
     let query = format!("{} {}", get("artist"), get("title"));
-    let url = match ytm::page_url_for(ctx, &id, &get("url"), &query).await {
+    let (h_artist, h_title) = (get("artist"), get("title"));
+    let hint = ytm::TrackHint { artist: &h_artist, title: &h_title, duration: get("duration").parse::<f64>().unwrap_or(0.0) };
+    let url = match ytm::page_url_for_hint(ctx, &id, &get("url"), &query, Some(&hint)).await {
         Ok(u) => u,
         Err(e) => return json!({ "success": false, "error": e }),
     };

@@ -300,7 +300,7 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
         let id = s(t.get("id"));
         if is_youtube_id(id) {
             radio_ids.push(id.to_string());
-        } else if let Some(v) = ytm::find_video_id(ctx, s(t.get("artist")), s(t.get("title"))).await {
+        } else if let Some(v) = ytm::find_video_id_len(ctx, s(t.get("artist")), s(t.get("title")), t.get("duration").and_then(Value::as_f64).unwrap_or(0.0)).await {
             radio_ids.push(v);
         }
     }
@@ -441,7 +441,7 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
     let themed_only = instrumental || seeds.is_empty() && chart.is_empty();
     let mut turn = 0usize;
     loop {
-        if out.len() >= limit {
+        if out.len() >= limit + 6 {
             break;
         }
         // With a mood or activity set, every second track comes from the themed pool.
@@ -486,7 +486,7 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
         out.push(t);
     }
     for t in deferred {
-        if out.len() >= limit {
+        if out.len() >= limit + 6 {
             break;
         }
         let first = norm(s(t.get("artist")).split([',', '&', ';']).next().unwrap_or(""));
@@ -497,5 +497,8 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
         *n += 1;
         out.push(t);
     }
+    // a track found only by name gets its real video here, or it is left out: everything the stream offers plays exactly itself
+    let mut out = ytm::confirm_tracks(ctx, out).await;
+    out.truncate(limit);
     out
 }

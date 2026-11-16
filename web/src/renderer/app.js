@@ -5871,7 +5871,16 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (bestNe !== -1 && bestSim >= 0.6) {
             matched++;
             neIdx = bestNe + 1;
-            lineWordsMap[i] = neLines[bestNe].words;
+            // The words come from another source than the line times: they are moved so that the line starts together with its first word,
+            // otherwise a small difference between the two recordings would make the words run ahead of or behind their line.
+            const lineT = state.syncedLyrics[i].time;
+            const shift = (lineT >= 0 && Number.isFinite(neLines[bestNe].start)) ? lineT - neLines[bestNe].start : 0;
+            const words = neLines[bestNe].words;
+            lineWordsMap[i] = (Array.isArray(words) && shift && Math.abs(shift) <= 3)
+              ? words.map(w => (w && typeof w === 'object')
+                  ? { ...w, ...(w.start !== undefined ? { start: w.start + shift } : {}), ...(w.end !== undefined ? { end: w.end + shift } : {}), ...(w.time !== undefined ? { time: w.time + shift } : {}), ...(w.endTime !== undefined ? { endTime: w.endTime + shift } : {}) }
+                  : w)
+              : words;
           }
         }
 
@@ -6006,7 +6015,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   window.showLyricsWarnToast = showLyricsWarnToast;
 
+  /* The lyrics are matched to the length of the track. If the real audio turns out to have another length than the one the lyrics were
+     searched with, they are searched again with the real one, so that the timing is the one of the recording that is playing. */
+  function refetchLyricsForRealLength(audioDur) {
+    const tr = state.currentTrack;
+    if (!tr || !(audioDur > 1) || state.isCustomLyrics || !state.lyricsLoadedFor) return;
+    if (state.lyricsLoadedFor.id !== tr.id && state.lyricsLoadedFor.title !== tr.title) return;
+    if (state.lyricsRefetchedFor === state.lyricsLoadedFor.stamp) return;
+    if (!(Math.abs(audioDur - state.lyricsLoadedFor.dur) > 2.5)) return;
+    state.lyricsRefetchedFor = state.lyricsLoadedFor.stamp;
+    const source = localStorage.getItem('jeem_lyrics_source') || 'lrclib';
+    lyricsSessionCache.delete(`${tr.id || `${tr.artist}:${tr.title}`}:${source}`);
+    tr.duration = Math.round(audioDur);
+    loadSyncedLyrics(tr.title, tr.artist, state.loadToken);
+  }
+
   async function loadSyncedLyrics(title, artist, token) {
+    state.lyricsLoadedFor = state.currentTrack ? { id: state.currentTrack.id, title: state.currentTrack.title, dur: Number(state.currentTrack.duration) || 0, stamp: (state.lyricsLoadedFor && state.lyricsLoadedFor.stamp || 0) + 1 } : null;
     showLyricsWarnToast(null);
     if (el.lyricsContainer) {
       el.lyricsContainer.scrollTop = 0;
@@ -6085,7 +6110,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
       state.isCustomLyrics = !!data.isCustom;
-      if (data.approx) showLyricsWarnToast(t('The timing of these lyrics may be slightly off'));
+      if (data.unsynced) showLyricsWarnToast(t('Timed lyrics for this version were not found, the words are shown without timing'));
+      else if (data.approx) showLyricsWarnToast(t('The timing of these lyrics may be slightly off'));
 
       const raw = data.lyrics;
       const lines = raw.split('\n');
@@ -10115,6 +10141,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const d = formatDuration(getReliableTrackDuration());
       if (el.timeDuration) el.timeDuration.textContent = d;
       if (el.tvkTimeDuration) el.tvkTimeDuration.textContent = d;
+      if (audioDur > 1 && isTrackDurationCompatible(metaDur, audioDur)) refetchLyricsForRealLength(audioDur);
     });
 
     el.nativeAudio.addEventListener('play', () => {

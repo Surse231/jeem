@@ -646,7 +646,7 @@ pub async fn yt_chart(ctx: &Ctx, country: &str) -> (String, Vec<Value>) {
 }
 
 /// The id of the YouTube video that plays "artist - title" (cached for a day).
-pub async fn find_video_id(ctx: &Ctx, artist: &str, title: &str) -> Option<String> {
+pub async fn find_video_id_len(ctx: &Ctx, artist: &str, title: &str, duration: f64) -> Option<String> {
     let q = format!("{artist} {title}").trim().to_lowercase();
     if q.is_empty() {
         return None;
@@ -658,7 +658,8 @@ pub async fn find_video_id(ctx: &Ctx, artist: &str, title: &str) -> Option<Strin
         }
     }
     let found = ytm_search(ctx, &q).await.unwrap_or_default();
-    let id = found.first().map(|x| text(x.get("id")).to_string()).unwrap_or_default();
+    let hint = TrackHint { artist, title, duration };
+    let id = best_match(&found, Some(&hint)).map(|x| text(x.get("id")).to_string()).unwrap_or_default();
     ctx.search_cache.lock().unwrap().insert(key, (Instant::now(), vec![json!({ "id": id })]));
     if id.is_empty() { None } else { Some(id) }
 }
@@ -768,6 +769,213 @@ pub async fn deezer_chart(ctx: &Ctx, limit: usize) -> Vec<Value> {
 // Direct audio URL for a page URL (cached for a few hours).
 // The page (YouTube watch URL...) a track plays from. Tracks that only have a name are looked up once and remembered.
 pub async fn page_url_for(ctx: &Arc<Ctx>, id: &str, url: &str, query: &str) -> Result<String, String> {
+    page_url_for_hint(ctx, id, url, query, None).await
+}
+
+/// What the listener asked for: the artist, the title and the length, to tell the right recording from a similar one.
+pub struct TrackHint<'a> {
+    pub artist: &'a str,
+    pub title: &'a str,
+    pub duration: f64,
+}
+
+const VERSION_TAGS: [(&str, f64); 10] = [
+    ("live", 3.0),
+    ("remix", 4.0),
+    ("cover", 4.0),
+    ("karaoke", 5.0),
+    ("instrumental", 4.0),
+    ("acoustic", 2.0),
+    ("slowed", 4.0),
+    ("sped", 4.0),
+    ("nightcore", 5.0),
+    ("reverb", 3.0),
+];
+
+/// True when two titles are the same kind of version: a live recording is not a studio one, a remix is not the original.
+pub fn same_version(a: &str, b: &str) -> bool {
+    let (wa, wb) = (title_words(a), title_words(b));
+    VERSION_TAGS.iter().all(|(t, _)| wa.iter().any(|w| w == t) == wb.iter().any(|w| w == t))
+}
+
+/// The time (seconds) of the last timestamp of a timed lyric, 0 when there is none.
+fn last_timestamp(lrc: &str) -> f64 {
+    let mut last = 0.0f64;
+    for l in lrc.lines() {
+        let l = l.trim_start();
+        let Some(rest) = l.strip_prefix('[') else { continue };
+        let Some(end) = rest.find(']') else { continue };
+        let Some((m, sec)) = rest[..end].split_once(':') else { continue };
+        if let (Ok(m), Ok(sec)) = (m.parse::<f64>(), sec.parse::<f64>()) {
+            last = last.max(m * 60.0 + sec);
+        }
+    }
+    last
+}
+
+/// Timestamps removed: the text of a timed lyric as plain lines.
+fn strip_times(lrc: &str) -> String {
+    lrc.lines()
+        .filter_map(|l| {
+            let mut rest = l.trim();
+            while rest.starts_with('[') {
+                match rest.find(']') {
+                    Some(i) if rest[1..i].chars().next().is_some_and(|c| c.is_ascii_digit()) => rest = rest[i + 1..].trim_start(),
+                    _ => break,
+                }
+            }
+            // word timestamps of the enhanced format
+            let mut clean = String::new();
+            let mut skip = false;
+            for c in rest.chars() {
+                match c {
+                    '<' => skip = true,
+                    '>' => skip = false,
+                    _ if !skip => clean.push(c),
+                    _ => {}
+                }
+            }
+            let clean = clean.trim().to_string();
+            if clean.is_empty() { None } else { Some(clean) }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn title_words(s: &str) -> Vec<String> {
+    s.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(String::from).collect()
+}
+
+/// How well a search result fits the wanted track: the title first, then the artist, the length and the kind of version (live, remix...).
+fn match_score(cand: &Value, hint: &TrackHint, index: usize) -> f64 {
+    let (want_title, cand_title) = (base_title(hint.title), base_title(text(cand.get("title"))));
+    let mut score = 0.0;
+    if !want_title.is_empty() && want_title == cand_title {
+        score += 6.0;
+    } else if want_title.len() >= 4 && cand_title.len() >= 4 && (want_title.contains(&cand_title) || cand_title.contains(&want_title)) {
+        score += 1.5;
+    } else {
+        score -= 3.0;
+    }
+    let norm = |s: &str| -> String { s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect() };
+    let want_artists: Vec<String> = hint.artist.split([',', '&', ';', '/']).map(|a| norm(a)).filter(|a| !a.is_empty()).collect();
+    let cand_artist = norm(text(cand.get("artist")));
+    if want_artists.is_empty() || want_artists.iter().any(|a| cand_artist.contains(a.as_str()) || a.contains(cand_artist.as_str())) {
+        score += 3.0;
+    } else {
+        score -= 2.0;
+    }
+    let dur = cand.get("duration").and_then(Value::as_f64).unwrap_or(0.0);
+    if hint.duration > 0.0 && dur > 0.0 {
+        let d = (hint.duration - dur).abs();
+        score += if d <= 3.0 { 3.0 } else if d <= 8.0 { 2.0 } else if d <= 20.0 { 0.5 } else if d > 40.0 { -3.0 } else { -1.0 };
+    }
+    let (want_w, cand_w) = (title_words(hint.title), title_words(text(cand.get("title"))));
+    for (tag, weight) in VERSION_TAGS {
+        if want_w.iter().any(|w| w == tag) != cand_w.iter().any(|w| w == tag) {
+            score -= weight;
+        }
+    }
+    score - index as f64 * 0.1
+}
+
+/// The best fitting result; without a hint the first one, as before.
+pub fn best_match<'a>(found: &'a [Value], hint: Option<&TrackHint>) -> Option<&'a Value> {
+    let Some(hint) = hint.filter(|h| !h.title.trim().is_empty()) else { return found.first() };
+    let mut best: Option<(f64, &Value)> = None;
+    for (i, c) in found.iter().take(10).enumerate() {
+        let sc = match_score(c, hint, i);
+        if best.map_or(true, |(b, _)| sc > b) {
+            best = Some((sc, c));
+        }
+    }
+    best.map(|b| b.1)
+}
+
+/// The result that is certainly the wanted recording, or None. Nothing "similar" is accepted:
+/// the artist must fit, the kind of version (live, remix...) must be the same, and the title must be the same
+/// with a length that differs by a few seconds at most (or an almost identical title with the length within 2 seconds).
+pub fn exact_match<'a>(found: &'a [Value], hint: &TrackHint) -> Option<&'a Value> {
+    let want_title = base_title(hint.title);
+    if want_title.is_empty() {
+        return None;
+    }
+    let norm = |s: &str| -> String { s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect() };
+    let want_artists: Vec<String> = hint.artist.split([',', '&', ';', '/']).map(|a| norm(a)).filter(|a| !a.is_empty()).collect();
+    let want_w = title_words(hint.title);
+    let mut best: Option<(f64, &Value)> = None;
+    for (i, c) in found.iter().take(10).enumerate() {
+        let cand_artist = norm(text(c.get("artist")));
+        if !want_artists.is_empty() && !want_artists.iter().any(|a| cand_artist.contains(a.as_str()) || a.contains(cand_artist.as_str())) {
+            continue;
+        }
+        let cand_w = title_words(text(c.get("title")));
+        if VERSION_TAGS.iter().any(|(t, _)| want_w.iter().any(|w| w == t) != cand_w.iter().any(|w| w == t)) {
+            continue;
+        }
+        let dur = c.get("duration").and_then(Value::as_f64).unwrap_or(0.0);
+        let diff = if hint.duration > 0.0 && dur > 0.0 { Some((hint.duration - dur).abs()) } else { None };
+        let same_title = base_title(text(c.get("title"))) == want_title;
+        let ok = if same_title {
+            diff.map_or(true, |d| d <= 10.0)
+        } else {
+            let shared = want_w.iter().filter(|w| cand_w.contains(w)).count() as f64;
+            let all = (want_w.len() + cand_w.len()) as f64 - shared;
+            diff.map_or(false, |d| d <= 2.0) && all > 0.0 && shared / all >= 0.5
+        };
+        if !ok {
+            continue;
+        }
+        let rank = diff.unwrap_or(5.0) + if same_title { 0.0 } else { 3.0 } + i as f64 * 0.1;
+        if best.map_or(true, |(b, _)| rank < b) {
+            best = Some((rank, c));
+        }
+    }
+    best.map(|b| b.1)
+}
+
+/// Tracks that only came with a name (Deezer lists) get their real YouTube video before they are offered:
+/// the one that is certainly the same recording, or the track is left out, so that nothing offered can play something else.
+pub async fn confirm_tracks(ctx: &Ctx, tracks: Vec<Value>) -> Vec<Value> {
+    async fn one(ctx: &Ctx, t: Option<&Value>) -> Option<Value> {
+        let t = t?;
+        let id = text(t.get("id"));
+        if !id.starts_with("dz-") {
+            return Some(t.clone());
+        }
+        let (artist, title) = (text(t.get("artist")), text(t.get("title")));
+        let key = format!("dzvid:{id}");
+        let cached = ctx.search_cache.lock().unwrap().get(&key).filter(|(at, _)| at.elapsed() < Duration::from_secs(24 * 3600)).map(|(_, v)| v.clone());
+        let video = match cached {
+            Some(v) => text(v.first().and_then(|x| x.get("id"))).to_string(),
+            None => {
+                let found = ytm_search(ctx, &format!("{artist} {title}")).await.unwrap_or_default();
+                let hint = TrackHint { artist, title, duration: t.get("duration").and_then(Value::as_f64).unwrap_or(0.0) };
+                let vid = exact_match(&found, &hint).map(|m| text(m.get("id")).to_string()).unwrap_or_default();
+                if !found.is_empty() {
+                    ctx.search_cache.lock().unwrap().insert(key, (Instant::now(), vec![json!({ "id": vid })]));
+                }
+                vid
+            }
+        };
+        if !valid_video_id(&video) {
+            return None;
+        }
+        let mut out = t.clone();
+        out["id"] = json!(video);
+        out["url"] = json!(format!("https://www.youtube.com/watch?v={video}"));
+        out["source"] = json!("ytmusic");
+        Some(out)
+    }
+    let mut out = Vec::with_capacity(tracks.len());
+    for chunk in tracks.chunks(4) {
+        let (a, b, c, d) = tokio::join!(one(ctx, chunk.first()), one(ctx, chunk.get(1)), one(ctx, chunk.get(2)), one(ctx, chunk.get(3)));
+        out.extend([a, b, c, d].into_iter().flatten());
+    }
+    out
+}
+
+pub async fn page_url_for_hint(ctx: &Arc<Ctx>, id: &str, url: &str, query: &str, hint: Option<&TrackHint<'_>>) -> Result<String, String> {
     if !url.is_empty() && !id.starts_with("dz-") {
         return Ok(url.to_string());
     }
@@ -775,14 +983,17 @@ pub async fn page_url_for(ctx: &Arc<Ctx>, id: &str, url: &str, query: &str) -> R
     if q.is_empty() {
         return Err("could not find the track on YouTube".into());
     }
-    let key = format!("search:{}", q.to_lowercase());
+    let key = format!("search:{}:{}", q.to_lowercase(), hint.map_or(0, |h| (h.duration / 5.0) as u64));
     if let Some((t, u)) = ctx.stream_cache.lock().unwrap().get(&key) {
         if t.elapsed() < STREAM_TTL {
             return Ok(u.clone());
         }
     }
     let found = ytm_search(ctx, q).await.unwrap_or_default();
-    let first = found.first().ok_or("could not find the track on YouTube")?;
+    let first = match hint.filter(|h| !h.title.trim().is_empty()) {
+        Some(h) => exact_match(&found, h).ok_or("No exact match for this track on YouTube Music. Find it through the search so that the right one plays")?,
+        None => best_match(&found, None).ok_or("could not find the track on YouTube")?,
+    };
     let page = text(first.get("url")).to_string();
     ctx.stream_cache.lock().unwrap().insert(key, (Instant::now(), page.clone()));
     Ok(page)
@@ -839,7 +1050,8 @@ pub async fn prefetch(ctx: Arc<Ctx>, tracks: Vec<Value>) {
             continue;
         }
         let query = format!("{} {}", text(t.get("artist")), text(t.get("title")));
-        let Ok(page) = page_url_for(&ctx, id, text(t.get("url")), &query).await else { continue };
+        let hint = TrackHint { artist: text(t.get("artist")), title: text(t.get("title")), duration: t.get("duration").and_then(Value::as_f64).unwrap_or(0.0) };
+        let Ok(page) = page_url_for_hint(&ctx, id, text(t.get("url")), &query, Some(&hint)).await else { continue };
         if crate::cache::find(&ctx, &crate::cache::key_for(&page)).is_some() || cached_stream(&ctx, &page).is_some() {
             continue;
         }
@@ -903,7 +1115,9 @@ pub async fn stream_info(ctx: &Arc<Ctx>, q: &std::collections::HashMap<String, S
     }
     if url.is_empty() || get("id").starts_with("dz-") {
         let query = if !get("q").is_empty() { get("q") } else { format!("{} {}", get("artist"), get("title")) };
-        url = page_url_for(ctx, &get("id"), "", &query).await?;
+        let (h_artist, h_title) = (get("artist"), get("title"));
+        let hint = TrackHint { artist: &h_artist, title: &h_title, duration: get("duration").parse::<f64>().unwrap_or(0.0) };
+        url = page_url_for_hint(ctx, &get("id"), "", &query, Some(&hint)).await?;
         // The track may already be saved for offline under its YouTube id.
         if !for_share && get("forceYtDlp") != "1" {
             if let Some((key, _)) = crate::cache::find(ctx, &crate::cache::key_for(&url)) {
@@ -913,6 +1127,7 @@ pub async fn stream_info(ctx: &Arc<Ctx>, q: &std::collections::HashMap<String, S
         }
     }
     let raw = resolve_direct(ctx, &url).await?;
+    let resolved_id = crate::cache::key_for(&url);
     let is_hls = raw.contains(".m3u8");
     let proxied = format!("http://127.0.0.1:{}/api/audio-proxy?url={}", ctx.port, urlencode(&raw));
     if for_share {
@@ -922,7 +1137,8 @@ pub async fn stream_info(ctx: &Arc<Ctx>, q: &std::collections::HashMap<String, S
     Ok(json!({
         "success": true, "isLocal": false,
         "streamUrl": if is_hls { raw.clone() } else { proxied.clone() },
-        "rawStreamUrl": raw, "proxyUrl": proxied, "isHls": is_hls
+        "rawStreamUrl": raw, "proxyUrl": proxied, "isHls": is_hls,
+        "resolvedId": if valid_video_id(&resolved_id) { json!(resolved_id) } else { Value::Null }
     }))
 }
 
@@ -1013,13 +1229,24 @@ async fn lrclib_best(ctx: &Ctx, title: &str, artist: &str, dur: f64) -> Option<(
         } else {
             -6.0
         };
+        if !same_version(title, text(it.get("trackName"))) {
+            score -= 5.0;
+        }
         let who: String = text(it.get("artistName")).to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect();
         score += if want_artists.is_empty() || want_artists.iter().any(|a| who.contains(a.as_str()) || a.contains(who.as_str())) { 2.0 } else { -2.0 };
         if synced {
             score += 2.0;
         }
         let their = it.get("duration").and_then(Value::as_f64).unwrap_or(0.0);
-        let diff = if dur > 0.0 && their > 0.0 { (their - dur).abs() } else { 0.0 };
+        let mut diff = if dur > 0.0 && their > 0.0 { (their - dur).abs() } else { 0.0 };
+        // The listed length can be wrong (the timing of a studio version under a live recording's length): the timing itself tells.
+        if synced && dur > 0.0 {
+            let over = last_timestamp(text(it.get("syncedLyrics"))) - dur;
+            if over > 3.0 {
+                score -= 10.0;
+                diff = diff.max(over);
+            }
+        }
         if dur > 0.0 && their > 0.0 {
             score += if diff <= 1.0 { 5.0 } else if diff <= 2.0 { 4.0 } else if diff <= 4.0 { 2.0 } else if diff <= 8.0 { -1.0 } else { -4.0 };
         }
@@ -1053,8 +1280,11 @@ pub async fn lyrics(ctx: &Ctx, title: &str, artist: &str, duration: &str) -> Val
     let is_timed = |t: &str| t.lines().filter(|l| l.trim_start().starts_with('[') && l.contains(':')).count() >= 4;
     let mut found = String::new();
     let mut approx = false;
+    let mut unsynced = false;
+    let mut length_off = 0.0;
     if let Some((text, timed, diff)) = lrclib_best(ctx, title, artist, dur).await {
         approx = timed && dur > 0.0 && diff > 3.5;
+        length_off = if timed { diff } else { 0.0 };
         found = text;
     }
     // LRCLIB has no timed text, or only for a recording of another length: the second source is asked.
@@ -1062,7 +1292,22 @@ pub async fn lyrics(ctx: &Ctx, title: &str, artist: &str, duration: &str) -> Val
         if let Some(lrc) = crate::extras::netease_lrc(ctx, title, artist, dur).await {
             found = lrc;
             approx = false;
+            length_off = 0.0;
         }
+    }
+    // The only timed text is for a recording that is clearly another one (a studio version for a live track...):
+    // its timing would be wrong all the way through, so the words are shown without timing instead.
+    if is_timed(&found) && dur > 0.0 {
+        let over = last_timestamp(&found) - dur;
+        if over > 3.0 {
+            length_off = length_off.max(over);
+            approx = true;
+        }
+    }
+    if is_timed(&found) && dur > 0.0 && length_off > 6.0 {
+        found = strip_times(&found);
+        approx = false;
+        unsynced = true;
     }
     // Still nothing: plain text from Genius, so the track at least shows its words.
     if found.trim().is_empty() {
@@ -1070,7 +1315,7 @@ pub async fn lyrics(ctx: &Ctx, title: &str, artist: &str, duration: &str) -> Val
             found = text;
         }
     }
-    json!({ "success": true, "lyrics": found, "isCustom": false, "isExplicit": false, "approx": approx })
+    json!({ "success": true, "lyrics": found, "isCustom": false, "isExplicit": false, "approx": approx, "unsynced": unsynced })
 }
 
 fn dz_track(it: &Value, i: usize) -> Value {

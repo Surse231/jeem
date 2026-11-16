@@ -407,7 +407,7 @@ async fn netease_song_id(ctx: &Ctx, title: &str, artist: &str, duration: f64) ->
                 }
             }
             let nc = norm(s(song.get("name")));
-            if nt.is_empty() || nc.is_empty() || (!nt.contains(&nc) && !nc.contains(&nt)) {
+            if nt.is_empty() || nc.is_empty() || (!nt.contains(&nc) && !nc.contains(&nt)) || !crate::ytm::same_version(title, s(song.get("name"))) {
                 return false;
             }
             let cands: Vec<String> = song
@@ -443,7 +443,7 @@ pub async fn words(ctx: &Ctx, title: &str, artist: &str, duration: f64) -> Value
                 }
             }
             let nc = norm(s(song.get("name")));
-            if nt.is_empty() || nc.is_empty() || (!nt.contains(&nc) && !nc.contains(&nt)) {
+            if nt.is_empty() || nc.is_empty() || (!nt.contains(&nc) && !nc.contains(&nt)) || !crate::ytm::same_version(title, s(song.get("name"))) {
                 return false;
             }
             let cands: Vec<String> = song
