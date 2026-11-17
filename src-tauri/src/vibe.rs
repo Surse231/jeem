@@ -244,13 +244,41 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
     };
     let recent_artists: HashSet<String> = list("/recentArtists").iter().map(|a| norm(a)).collect();
 
+    // What the listener taught the stream with their own reactions (computed in the app, see waveLearnPayload):
+    // how much they like each artist, how close each artist's sound is to what fits now, which seeds fit now,
+    // how often to try something new, and the track that is playing now.
+    let learn = body.get("learn").cloned().unwrap_or(Value::Null);
+    let num_map = |p: &str| -> std::collections::HashMap<String, f64> {
+        learn
+            .pointer(p)
+            .and_then(Value::as_object)
+            .map(|o| o.iter().map(|(k, v)| (norm(k), v.as_f64().unwrap_or(0.0))).collect())
+            .unwrap_or_default()
+    };
+    let affinity = num_map("/artist");
+    let sound = num_map("/sound");
+    let seed_boost: std::collections::HashMap<String, f64> = learn
+        .pointer("/seedBoost")
+        .and_then(Value::as_object)
+        .map(|o| {
+            o.iter()
+                .map(|(k, v)| {
+                    let mut it = k.splitn(2, "::");
+                    (format!("{}::{}", norm(it.next().unwrap_or("")), norm(it.next().unwrap_or(""))), v.as_f64().unwrap_or(1.0))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let explore_rate = learn.get("exploreRate").and_then(Value::as_f64).unwrap_or(0.1).clamp(0.0, 0.4);
+    let aff_of = |a: &str| -> f64 { affinity.get(a).copied().unwrap_or(0.0) };
+
     // Seeds: everything the listener liked (newer likes count more), what they were just given a like for, and a little of the recent history.
     let mut seeds: Vec<Value> = Vec::new();
     let mut weights: Vec<(usize, f64)> = Vec::new();
     let mut seen_seed = HashSet::new();
     let mut push_seed = |t: &Value, w: f64, seeds: &mut Vec<Value>, weights: &mut Vec<(usize, f64)>| {
         let a = norm(s(t.get("artist")).split([',', '&', ';']).next().unwrap_or(""));
-        if a.is_empty() || avoid_artists.contains(&a) || s(t.get("platform")) == "local" {
+        if a.is_empty() || avoid_artists.contains(&a) || s(t.get("platform")) == "local" || aff_of(&a) < -3.0 {
             return;
         }
         if !seen_seed.insert(track_key(s(t.get("artist")), s(t.get("title")))) {
@@ -258,8 +286,10 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
         }
         // one artist with many likes must not take over the stream: each further seed of the same artist weighs less
         let n_same = seeds.iter().filter(|x| norm(s(x.get("artist")).split([',', '&', ';']).next().unwrap_or("")) == a).count() as f64;
+        let fits_now = seed_boost.get(&track_key(s(t.get("artist")), s(t.get("title")))).copied().unwrap_or(1.0);
+        let liking = (1.0 + 0.2 * aff_of(&a)).clamp(0.2, 3.0);
         seeds.push(t.clone());
-        weights.push((seeds.len() - 1, w / (1.0 + n_same * 0.7)));
+        weights.push((seeds.len() - 1, w * fits_now * liking / (1.0 + n_same * 0.7)));
     };
     for t in &liked_now {
         push_seed(t, 6.0, &mut seeds, &mut weights);
@@ -302,6 +332,12 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
             radio_ids.push(id.to_string());
         } else if let Some(v) = ytm::find_video_id_len(ctx, s(t.get("artist")), s(t.get("title")), t.get("duration").and_then(Value::as_f64).unwrap_or(0.0)).await {
             radio_ids.push(v);
+        }
+    }
+    if let Some(np) = learn.get("nowPlaying").map(|n| s(n.get("id")).to_string()).filter(|i| is_youtube_id(i)) {
+        if !radio_ids.contains(&np) {
+            radio_ids.insert(0, np);
+            radio_ids.truncate(3);
         }
     }
     let mut radios: Vec<Vec<Value>> = Vec::new();
@@ -353,6 +389,11 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
             if language.is_empty() && dominant != 0 && script_of(&text_all) != dominant {
                 score -= 1.6;
             }
+            let af = aff_of(&a);
+            if af < -4.0 {
+                continue;
+            }
+            score += 0.45 * af.clamp(-4.0, 4.0) + 0.9 * sound.get(&a).copied().unwrap_or(0.0);
             scored.push((score, t));
         }
     }
@@ -419,8 +460,28 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
         }
     }
 
-    // Discovery: now and then (every fourth track) something outside the listener's usual artists, so that a new favourite can turn up.
+    // Discovery: artists the listener does not know yet. How often they come is learned from the reactions to earlier new tracks
+    // (explore_rate); the best new candidates are the ones the radios of the listener's own music suggest, the country chart comes after them.
     let seed_artists: HashSet<String> = seeds.iter().map(|t| norm(s(t.get("artist")).split([',', '&', ';']).next().unwrap_or(""))).collect();
+    let familiar: HashSet<String> = list("/knownArtists")
+        .iter()
+        .map(|a| norm(a))
+        .chain(affinity.keys().cloned())
+        .chain(seed_artists.iter().cloned())
+        .collect();
+    let first_artist = |t: &Value| norm(s(t.get("artist")).split([',', '&', ';']).next().unwrap_or(""));
+    // The best half of the radio candidates is the usual stream (new artists there are close to the listener's taste anyway);
+    // from the weaker half, the artists the listener has never played are kept apart as the "something new" pool.
+    let (taste, taste_new): (Vec<Value>, Vec<Value>) = if familiarity == "unknown" {
+        (taste, Vec::new())
+    } else {
+        let cut = taste.len() / 2;
+        let mut head = taste;
+        let tail = head.split_off(cut);
+        let (tail_known, tail_new): (Vec<Value>, Vec<Value>) = tail.into_iter().partition(|t| familiar.contains(&first_artist(t)));
+        head.extend(tail_known);
+        (head, tail_new)
+    };
     let mut explore: Vec<Value> = if familiarity == "favorite" || instrumental {
         Vec::new()
     } else {
@@ -429,8 +490,13 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
         }
         chart.clone()
     };
-    explore.retain(|t| !seed_artists.contains(&norm(s(t.get("artist")).split([',', '&', ';']).next().unwrap_or(""))));
+    explore.retain(|t| !familiar.contains(&first_artist(t)));
+    // a listener of music in one language is not given a chart track in another one as the "new" thing
+    if dominant != 0 {
+        explore.retain(|t| script_of(&format!("{} {}", s(t.get("title")), s(t.get("artist")))) == dominant);
+    }
     rng.shuffle(&mut explore);
+    let explore: Vec<Value> = if familiarity == "favorite" || instrumental { Vec::new() } else { taste_new.into_iter().chain(explore).collect() };
     let mut ei = explore.into_iter();
 
     let mut out: Vec<Value> = Vec::new();
@@ -446,16 +512,20 @@ pub async fn recommend(ctx: &Arc<Ctx>, body: &Value, limit: usize) -> Vec<Value>
         }
         // With a mood or activity set, every second track comes from the themed pool.
         let from_themed = themed_only || turn % 2 == 1;
-        let from_explore = !themed_only && turn % 4 == 3;
+        let from_explore = !themed_only && (rng.next() % 10_000) as f64 / 10_000.0 < explore_rate;
         turn += 1;
         let next = if from_explore {
-            ei.next().or_else(|| hi.next()).or_else(|| ti.next())
+            ei.next().map(|t| (t, true)).or_else(|| hi.next().map(|t| (t, false))).or_else(|| ti.next().map(|t| (t, false)))
         } else if from_themed {
-            hi.next().or_else(|| ti.next())
+            hi.next().or_else(|| ti.next()).map(|t| (t, false))
         } else {
-            ti.next().or_else(|| hi.next())
+            ti.next().or_else(|| hi.next()).or_else(|| ei.next()).map(|t| (t, false))
         };
-        let Some(t) = next else { break };
+        let Some((mut t, is_new)) = next else { break };
+        // a track offered as something new is marked, so that the reaction to it teaches how often to try new music
+        if is_new {
+            t["waveNew"] = json!(true);
+        }
         let (title, artist) = (s(t.get("title")).to_string(), s(t.get("artist")).to_string());
         let a = norm(&artist);
         if avoid_ids.contains(&s(t.get("id")).to_lowercase()) || avoid_artists.contains(&a) || known.contains(&a) || avoid_keys.contains(&track_key(&artist, &title)) {

@@ -229,7 +229,7 @@ const EXCLUDED_PERSONAL_KEYS = new Set([
   'jeem_local_tracks', 'jeem_local_files', 'devsize_local_tracks', 'devsize_local_files',
   'jeem_saved_albums', 'jeem_search_history_v2', 'jeem_favorite_artists',
   'jeem_unfollowed_artists', 'jeem_artist_meta_cache', 'jeem_daily_mixes',
-  'jeem_my_wave_cache', 'jeem_trending_cache', 'jeem_new_releases', 'jeem_wave_skips',
+  'jeem_my_wave_cache', 'jeem_trending_cache', 'jeem_new_releases', 'jeem_wave_skips', 'jeem_wave_model',
   'jeem_failed_tracks', 'jeem_mix_feedback', 'jeem_pinned_tracks',
   'jeem_sidebar_pinned_tracks', 'jeem_pinned_playlists', 'jeem_user_nickname',
   'jeem_user_avatar', 'jeem_user_banner', 'jeem_artist_listen', 'jeem_listen_extra', 'jeem_lastfm_sk', 'jeem_lastfm_user',
@@ -5273,11 +5273,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     vizPrev = null;
     if (state.currentTrack && state.currentTrack.id !== track.id && !navigatingBack) pushPlayHistory(state.currentTrack);
 
+    if (state.currentTrack && typeof waveLearnLeave === 'function') {
+      try {
+        if (isSameTrack(state.currentTrack, track)) {
+          waveLearnEvent(track, 2);
+        } else {
+          const playedSec = (el.nativeAudio && typeof el.nativeAudio.currentTime === 'number') ? el.nativeAudio.currentTime : 0;
+          const durSec = (el.nativeAudio && Number.isFinite(el.nativeAudio.duration)) ? el.nativeAudio.duration : (Number(state.currentTrack.duration) || 0);
+          waveLearnLeave(state.currentTrack, playedSec, durSec, !!state._isNaturalEnding);
+        }
+      } catch (_) {}
+    }
     if (!state._isNaturalEnding && state.myWaveActive && state.currentTrack && !isSameTrack(state.currentTrack, track)) {
       const curId = (typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(state.currentTrack) : '') || state.currentTrack.id;
       if (state._skipRecordedFor !== curId) {
         const cur = (el.nativeAudio && typeof el.nativeAudio.currentTime === 'number') ? el.nativeAudio.currentTime : 0;
-        if (cur < 12 && typeof recordWaveSkip === 'function') {
+        if (cur < 30 && typeof recordWaveSkip === 'function') {
           recordWaveSkip(state.currentTrack);
         }
       }
@@ -6017,6 +6028,44 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   /* The lyrics are matched to the length of the track. If the real audio turns out to have another length than the one the lyrics were
      searched with, they are searched again with the real one, so that the timing is the one of the recording that is playing. */
+  /* A track whose title does not describe the audio that really plays (a wrong id kept from an old mismatch, a stale copy in the
+     favourites...) is corrected from the video itself. It is checked only when the real length also differs, and never for tracks the
+     listener renamed on purpose. */
+  const identityChecked = new Set();
+  async function verifyTrackIdentity(track, audioDur, metaDur) {
+    try {
+      if (!track || !(audioDur > 1) || !(metaDur > 0) || Math.abs(audioDur - metaDur) <= 8) return;
+      const vid = String(track.id || '');
+      if (!/^[a-zA-Z0-9_-]{11}$/.test(vid) || track.platform === 'soundcloud' || track.platform === 'local' || track.isPodcast || identityChecked.has(vid)) return;
+      identityChecked.add(vid);
+      const canon = typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(track) : '';
+      if (canon && getTrackRenames()[canon]) return;
+      const res = await fetch(`http://127.0.0.1:${state.serverPort}/api/video-meta?id=${encodeURIComponent(vid)}`);
+      const meta = await res.json();
+      if (!meta || !meta.success || !state.currentTrack || state.currentTrack.id !== vid) return;
+      const norm = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+      const hay = norm(meta.fullTitle) + norm(meta.artist);
+      const wantTitle = norm(String(track.title || '').replace(/\s*[\(\[][^)\]]*[\)\]]/g, ''));
+      if (wantTitle && hay.includes(wantTitle)) return;
+      const fix = (t) => {
+        if (!t || t.id !== vid) return;
+        t.title = meta.title;
+        t.artist = meta.artist || t.artist;
+        t.duration = Math.round(audioDur);
+        t.thumbnail = 'https://i.ytimg.com/vi/' + vid + '/hqdefault.jpg';
+        t.cover = t.thumbnail;
+      };
+      [state.favorites, state.queue, state.history].forEach(list => { if (Array.isArray(list)) list.forEach(fix); });
+      if (Array.isArray(state.playlists)) state.playlists.forEach(p => { if (p && Array.isArray(p.tracks)) p.tracks.forEach(fix); });
+      fix(state.currentTrack);
+      try { localStorage.setItem('devsize_favorites', JSON.stringify(state.favorites)); } catch (_) {}
+      try { localStorage.setItem('devsize_playlists', JSON.stringify(state.playlists)); } catch (_) {}
+      updateNowPlayingUI(state.currentTrack);
+      loadSyncedLyrics(state.currentTrack.title, state.currentTrack.artist, state.loadToken);
+      showToast(t('Track info corrected to match the audio'));
+    } catch (_) {}
+  }
+
   function refetchLyricsForRealLength(audioDur) {
     const tr = state.currentTrack;
     if (!tr || !(audioDur > 1) || state.isCustomLyrics || !state.lyricsLoadedFor) return;
@@ -7395,7 +7444,46 @@ document.addEventListener('DOMContentLoaded', async () => {
   var wheelRafId = 0;
   var wheelReturnTimer = null;
 
+  /* Scrolling the lyrics by hand: a small nudge (most likely by accident) returns to the current line after a moment; a real scroll
+     (more than about two lines) lets go of the current line, so the lyrics stay where the listener put them, and a button
+     "Current line" brings them back. */
+  let lyricsDetached = false;
+  function lyricsReturnButton(create) {
+    const c = el.lyricsContainer;
+    if (!c) return null;
+    let b = c.querySelector('.lyrics-return-btn');
+    if (!b && create) {
+      b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'lyrics-return-btn';
+      b.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="6 13 12 19 18 13"></polyline></svg><span></span>';
+      b.querySelector('span').textContent = t('Current line');
+      b.addEventListener('click', (e) => { e.stopPropagation(); lyricsReattach(true); });
+      c.appendChild(b);
+    }
+    return b;
+  }
+  function lyricsDetach() {
+    lyricsDetached = true;
+    if (wheelReturnTimer) { clearTimeout(wheelReturnTimer); wheelReturnTimer = null; }
+    const b = lyricsReturnButton(true);
+    if (b) b.classList.add('visible');
+  }
+  function lyricsReattach(animate) {
+    lyricsDetached = false;
+    const b = lyricsReturnButton(false);
+    if (b) b.classList.remove('visible');
+    if (animate) {
+      manualLyricsTargetOffset = 0;
+      if (el.lyricsContainer) el.lyricsContainer.classList.add('lyrics-wheeling');
+      if (!wheelRafId) wheelRafId = requestAnimationFrame(stepLyricsWheel);
+    }
+  }
+
   function resetManualLyricsWheel() {
+    lyricsDetached = false;
+    const rb = el.lyricsContainer && el.lyricsContainer.querySelector('.lyrics-return-btn');
+    if (rb) rb.classList.remove('visible');
     manualLyricsTargetOffset = 0;
     manualLyricsOffset = 0;
     if (wheelRafId) {
@@ -7477,16 +7565,24 @@ document.addEventListener('DOMContentLoaded', async () => {
       wheelRafId = requestAnimationFrame(stepLyricsWheel);
     }
     if (wheelReturnTimer) clearTimeout(wheelReturnTimer);
+    // lyrics without timing have no "current line" to come back to: they stay where the listener scrolled them
+    const hasTiming = Array.isArray(state.syncedLyrics) && state.syncedLyrics.some(l => l && l.time >= 0);
+    if (!hasTiming) return;
+    const lineH = (lines[0] && lines[0].offsetHeight) || 40;
+    if (lyricsDetached || Math.abs(manualLyricsTargetOffset) > Math.max(110, lineH * 2.2)) {
+      lyricsDetach();
+      return;
+    }
     wheelReturnTimer = setTimeout(() => {
       wheelReturnTimer = null;
-      if (state.isPlaying) {
+      if (state.isPlaying && !lyricsDetached) {
         manualLyricsTargetOffset = 0;
         container.classList.add('lyrics-wheeling');
         if (!wheelRafId) {
           wheelRafId = requestAnimationFrame(stepLyricsWheel);
         }
       }
-    }, 3200);
+    }, 1600);
   }
 
   function layoutLyricsCascade(activeIndex, snap = false) {
@@ -7617,11 +7713,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     const lineChanged = state.lastActiveLyricIdx !== activeIndex || state.forceLyricsScroll;
     const shouldSnap = state.forceSnapLyrics;
 
-    if (lineChanged && state.lastActiveLyricIdx !== activeIndex) {
+    const keepView = lyricsDetached && state.lastActiveLyricIdx !== activeIndex;
+    if (lineChanged && state.lastActiveLyricIdx !== activeIndex && !keepView) {
       resetManualLyricsWheel();
     }
 
-    if (hasLayout && (lineChanged || shouldSnap)) {
+    if (hasLayout && keepView) {
+      // the listener is reading elsewhere: the line under the middle of the view stays under it while the current line moves on
+      const all = parent.querySelectorAll('.lyric-line');
+      const mid = parent.clientHeight / 2;
+      let ref = null, refY = 0, best = Infinity;
+      all.forEach(l => {
+        if (l._baseY === undefined) return;
+        const y = l._baseY + manualLyricsOffset;
+        if (Math.abs(y - mid) < best) { best = Math.abs(y - mid); ref = l; refY = y; }
+      });
+      layoutLyricsCascade(activeIndex, false);
+      if (ref && ref._baseY !== undefined) {
+        manualLyricsOffset += refY - (ref._baseY + manualLyricsOffset);
+        manualLyricsTargetOffset = manualLyricsOffset;
+        applyManualWheelOffset();
+      }
+      state.forceLyricsScroll = false;
+      state.lastActiveLyricIdx = activeIndex;
+      if (!lyricsReturnButton(false)) lyricsDetach();
+    } else if (hasLayout && (lineChanged || shouldSnap)) {
       if (getAdv('lyrics_autoscroll', true)) {
         layoutLyricsCascade(activeIndex, shouldSnap);
       } else if (shouldSnap) {
@@ -9764,7 +9880,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!state._isNaturalEnding && state.myWaveActive && state.currentTrack) {
       const cur = (el.nativeAudio && typeof el.nativeAudio.currentTime === 'number') ? el.nativeAudio.currentTime : 0;
       const alreadyCounted = state._skipRecordedFor && state._skipRecordedFor === ((typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(state.currentTrack) : '') || state.currentTrack.id);
-      if (cur < 12 && !alreadyCounted && typeof recordWaveSkip === 'function') {
+      if (cur < 30 && !alreadyCounted && typeof recordWaveSkip === 'function') {
         recordWaveSkip(state.currentTrack);
         state._skipRecordedFor = (typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(state.currentTrack) : '') || state.currentTrack.id;
       }
@@ -10142,6 +10258,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (el.timeDuration) el.timeDuration.textContent = d;
       if (el.tvkTimeDuration) el.tvkTimeDuration.textContent = d;
       if (audioDur > 1 && isTrackDurationCompatible(metaDur, audioDur)) refetchLyricsForRealLength(audioDur);
+      verifyTrackIdentity(state.currentTrack, audioDur, metaDur);
     });
 
     el.nativeAudio.addEventListener('play', () => {
@@ -14288,6 +14405,7 @@ function renderClickableArtists(container, rawArtist, hintTrack = null) {
         if (!favGhosts.some(g => isSameTrack(g, track))) favGhosts.push(track);
       }
     } else {
+      if (typeof waveLearnEvent === 'function') waveLearnEvent(track, 3);
       state.favorites.unshift(stampAddedAt(track));
       offlineSaveTrack(track);
       if (favGhosts.some(g => isSameTrack(g, track))) keepRows = true;
@@ -17102,6 +17220,13 @@ function updateNavIndicator(animate) {
     });
   }
 
+  // the info button shows whether the track panel is open, whichever way it was opened or closed
+  if (el.btnToggleLyricsPanel && el.rightPanel && typeof MutationObserver !== 'undefined') {
+    const syncInfoBtn = () => el.btnToggleLyricsPanel.classList.toggle('active', !el.rightPanel.classList.contains('hidden'));
+    new MutationObserver(syncInfoBtn).observe(el.rightPanel, { attributes: true, attributeFilter: ['class'] });
+    syncInfoBtn();
+  }
+
   let showRpControls = null;
   if (el.rightPanel) {
     let rpHideTimer = null;
@@ -17476,6 +17601,17 @@ function bindCoverHoldZoom(wrapEl) {
     const url = 'https://github.com/Surse231';
     if (window.electronAPI && window.electronAPI.openExternal) window.electronAPI.openExternal(url);
     else window.open(url, '_blank');
+  });
+
+  // Donations (DonationAlerts): the row is shown only when the link is set.
+  const DONATE_URL = 'https://www.donationalerts.com/r/surse231';
+  const btnDonate = document.getElementById('btn-donate');
+  const donateRow = document.getElementById('setting-donate');
+  if (donateRow && !DONATE_URL) donateRow.classList.add('hidden');
+  if (btnDonate) btnDonate.addEventListener('click', () => {
+    if (!DONATE_URL) return;
+    if (window.electronAPI && window.electronAPI.openExternal) window.electronAPI.openExternal(DONATE_URL);
+    else window.open(DONATE_URL, '_blank');
   });
 
   const btnCompactEngineBtns = document.getElementById('btn-compact-engine-btns');
@@ -26926,6 +27062,7 @@ function bindCoverHoldZoom(wrapEl) {
         settings,
         region: detectUserMusicRegion(),
         knownArtists: waveKnownArtists(),
+        learn: waveLearnPayload(),
         ai: getWaveAi()
       })
     });
@@ -26935,6 +27072,8 @@ function bindCoverHoldZoom(wrapEl) {
       const k = typeof getTrackNormalizedKey === 'function' ? getTrackNormalizedKey(t.artist, t.title) : '';
       return !(k && skipKeys.has(String(k).toLowerCase())) && !(state.queue || []).some(q => isSameTrack(q, t)) && (settings.familiarity === 'favorite' || !isTrackFavorited(t));
     });
+    // tracks the stream chose itself: skipping one of them quickly teaches the stream (a track the listener picked does not)
+    fresh.forEach(t => { if (t) t._wave = true; });
     return waveMixFavorites(fresh);
   }
 
@@ -27026,6 +27165,7 @@ function bindCoverHoldZoom(wrapEl) {
     const cur = state.currentTrack;
     if (!cur) return;
     recordWaveSkip(cur, 2);
+    if (typeof waveLearnEvent === 'function') waveLearnEvent(cur, -4);
     state._skipRecordedFor = waveTrackId(cur);
     showToast(t('Got it, fewer tracks like this'));
     if (!state.myWaveActive) { playNext(); return; }
@@ -29351,6 +29491,172 @@ function bindCoverHoldZoom(wrapEl) {
       .replace(/\s+/g, ' ')
       .trim()
       .toLowerCase();
+  }
+
+  /* ---------- My Vibe learns from the listener (everything stays on this computer) ----------
+     Every reaction is an event with a weight: a like +3, playing a track again +2, listening to the end +1, half of it +0.3,
+     a skip in the first 30 seconds -1.5, a dislike -4. Events fade with time (half after a month) and the ones from the same
+     part of the day count more. The sound of every played track (energy, bass, brightness, how busy the rhythm is) is measured
+     while it plays, so that the stream can follow the sound of the moment. */
+  const WAVE_MODEL_KEY = 'jeem_wave_model';
+  function waveModelLoad() {
+    const m = safeJson(WAVE_MODEL_KEY, null) || {};
+    if (!Array.isArray(m.events)) m.events = [];
+    if (!m.explore || typeof m.explore !== 'object') m.explore = { pos: 1, neg: 1 };
+    if (!m.audio || typeof m.audio !== 'object') m.audio = {};
+    return m;
+  }
+  function waveModelSave(m) {
+    if (m.events.length > 800) m.events.splice(0, m.events.length - 800);
+    const keys = Object.keys(m.audio);
+    if (keys.length > 1500) keys.slice(0, keys.length - 1500).forEach(k => delete m.audio[k]);
+    try { localStorage.setItem(WAVE_MODEL_KEY, JSON.stringify(m)); } catch (_) {}
+  }
+  function waveDayPart(d = new Date()) {
+    const h = d.getHours();
+    return h >= 5 && h < 11 ? 'morning' : h >= 11 && h < 17 ? 'day' : h >= 17 && h < 23 ? 'evening' : 'night';
+  }
+  function waveMainArtist(t) { return String((t && t.artist) || '').split(/[,;&]|\sfeat\.?\s|\sft\.?\s/i)[0].trim(); }
+  function waveTrackKey(t) { return (t && typeof getTrackNormalizedKey === 'function') ? getTrackNormalizedKey(t.artist, t.title) : ''; }
+
+  function waveLearnEvent(track, score) {
+    if (!track || track.platform === 'local' || track.isPodcast) return;
+    const artist = waveMainArtist(track);
+    if (!artist) return;
+    const m = waveModelLoad();
+    m.events.push({ a: artist, k: waveTrackKey(track), s: score, t: Date.now(), p: waveDayPart() });
+    // the reaction to a track offered as something new decides how often new music comes
+    if (track.waveNew) {
+      if (score > 0.5) m.explore.pos += 1;
+      else if (score < 0) m.explore.neg += 1;
+    }
+    waveModelSave(m);
+  }
+
+  // the sound of the track that plays, measured four times a second
+  const waveSound = { key: '', artist: '', fa: '', ft: '', n: 0, e: 0, b: 0, c: 0, on: 0, prevBass: 0, buf: null };
+  function waveSoundSample() {
+    try {
+      const au = el.nativeAudio;
+      const tr = state.currentTrack;
+      if (!au || au.paused || !tr || tr.isPodcast || !audioEngine || !audioEngine.getAnalyserNode || !audioEngine.getFrequencyData) return;
+      const key = waveTrackKey(tr);
+      if (!key) return;
+      if (waveSound.key !== key) Object.assign(waveSound, { key, artist: waveMainArtist(tr), fa: tr.artist || '', ft: tr.title || '', n: 0, e: 0, b: 0, c: 0, on: 0, prevBass: 0 });
+      const an = audioEngine.getAnalyserNode();
+      if (!an || !an.frequencyBinCount) return;
+      if (!waveSound.buf || waveSound.buf.length !== an.frequencyBinCount) waveSound.buf = new Uint8Array(an.frequencyBinCount);
+      audioEngine.getFrequencyData(waveSound.buf);
+      const f = waveSound.buf;
+      const n = f.length;
+      const bassN = Math.max(2, Math.floor(n / 24));
+      let sum = 0, wsum = 0, bass = 0;
+      for (let i = 0; i < n; i++) { sum += f[i]; wsum += f[i] * i; if (i < bassN) bass += f[i]; }
+      if (sum < n * 2) return;
+      const bl = bass / bassN / 255;
+      if (bl > waveSound.prevBass * 1.25 + 0.04) waveSound.on++;
+      waveSound.prevBass = bl;
+      waveSound.n++;
+      waveSound.e += sum / n / 255;
+      waveSound.b += bl;
+      waveSound.c += wsum / sum / n;
+    } catch (_) {}
+  }
+  setInterval(waveSoundSample, 250);
+  function waveSoundNow() {
+    if (waveSound.n < 40) return null;
+    return { e: waveSound.e / waveSound.n, b: waveSound.b / waveSound.n, c: waveSound.c / waveSound.n, o: waveSound.on / (waveSound.n / 4) * 60 / 100 };
+  }
+  function waveSoundFlush() {
+    const f = waveSoundNow();
+    if (!f || !waveSound.key) return;
+    const m = waveModelLoad();
+    m.audio[waveSound.key] = { a: waveSound.artist, fa: waveSound.fa, ft: waveSound.ft, e: +f.e.toFixed(3), b: +f.b.toFixed(3), c: +f.c.toFixed(3), o: +f.o.toFixed(3) };
+    waveModelSave(m);
+    waveSound.key = '';
+  }
+
+  // A quick skip in the stream: the other upcoming tracks of that artist leave the queue at once.
+  function waveDropUpcomingArtist(artist) {
+    if (!state.myWaveActive || !artist || !Array.isArray(state.queue)) return;
+    const idx = state.queueIndex || 0;
+    const low = artist.toLowerCase();
+    const before = state.queue.length;
+    state.queue = state.queue.filter((t, i) => i <= idx || waveMainArtist(t).toLowerCase() !== low);
+    if (state.queue.length !== before) {
+      if (typeof updateQueueBadge === 'function') updateQueueBadge();
+      if (typeof window.refreshQueuePanel === 'function') window.refreshQueuePanel();
+    }
+  }
+
+  // Called when a track gives way to another one: how it was listened to is what the stream learns.
+  function waveLearnLeave(prev, played, dur, natural) {
+    waveSoundFlush();
+    if (!prev) return;
+    if (natural || (dur > 0 && played >= dur * 0.85)) waveLearnEvent(prev, 1);
+    else if (state.myWaveActive && prev._wave && played < 30) {
+      waveLearnEvent(prev, -1.5);
+      const artist = waveMainArtist(prev);
+      setTimeout(() => waveDropUpcomingArtist(artist), 0);
+    } else if (dur > 0 && played >= dur * 0.5) waveLearnEvent(prev, 0.3);
+  }
+
+  // What the stream is told: artist liking, the sound that fits now, which seeds fit now, how often to try new music, what plays now.
+  function waveLearnPayload() {
+    const m = waveModelLoad();
+    const now = Date.now();
+    const part = waveDayPart();
+    const artist = {};
+    for (const ev of m.events) {
+      const w = Math.pow(0.5, (now - ev.t) / 86400000 / 30) * (ev.p === part ? 1.5 : 1);
+      artist[ev.a] = (artist[ev.a] || 0) + ev.s * w;
+    }
+    const artistTop = Object.fromEntries(Object.entries(artist)
+      .sort((x, y) => Math.abs(y[1]) - Math.abs(x[1])).slice(0, 150)
+      .map(([k, v]) => [k, +Math.max(-6, Math.min(6, v)).toFixed(2)]));
+
+    const feats = m.audio;
+    const vec = (f) => [f.e, f.b, f.c, f.o];
+    let target = null;
+    let tw = 0;
+    const add = (f, w) => {
+      if (!f || !(w > 0)) return;
+      if (!target) target = [0, 0, 0, 0];
+      vec(f).forEach((x, i) => { target[i] += (Number(x) || 0) * w; });
+      tw += w;
+    };
+    m.events.filter(ev => ev.s > 0 && ev.p === part).slice(-60).forEach(ev => add(feats[ev.k], ev.s));
+    const cur = state.currentTrack;
+    const curKey = cur ? waveTrackKey(cur) : '';
+    const live = (waveSound.key && waveSound.key === curKey) ? waveSoundNow() : (feats[curKey] || null);
+    if (live) add(live, Math.max(3, tw));
+    const sound = {};
+    const seedBoost = {};
+    if (target && tw > 0) {
+      target = target.map(x => x / tw);
+      const scale = [0.15, 0.15, 0.08, 0.6];
+      const sim = (f) => {
+        const d = Math.sqrt(vec(f).reduce((s, x, i) => s + Math.pow(((Number(x) || 0) - target[i]) / scale[i], 2), 0));
+        return Math.max(-1, 1 - d / 2);
+      };
+      const byArtist = {};
+      Object.values(feats).forEach((f) => {
+        if (!f || !f.a) return;
+        const sm = sim(f);
+        (byArtist[f.a] = byArtist[f.a] || []).push(sm);
+        if (f.fa && f.ft) seedBoost[`${f.fa}::${f.ft}`] = +(0.5 + 0.65 * (sm + 1)).toFixed(2);
+      });
+      Object.entries(byArtist).forEach(([a, l]) => { sound[a] = +(l.reduce((s, x) => s + x, 0) / l.length).toFixed(2); });
+    }
+    const share = m.explore.pos / (m.explore.pos + m.explore.neg);
+    const listened = !!(cur && el.nativeAudio && el.nativeAudio.currentTime > 30 && /^[a-zA-Z0-9_-]{11}$/.test(String(cur.id || '')));
+    return {
+      artist: artistTop,
+      sound,
+      seedBoost: Object.fromEntries(Object.entries(seedBoost).slice(-300)),
+      exploreRate: +(0.03 + 0.27 * share * share).toFixed(3),
+      nowPlaying: listened ? { id: cur.id, artist: cur.artist, title: cur.title } : null
+    };
   }
 
   function getWaveSkips() {
@@ -32036,6 +32342,7 @@ function bindCoverHoldZoom(wrapEl) {
           'jeem_daily_mixes',
           'jeem_my_wave_cache',
           'jeem_wave_skips',
+          'jeem_wave_model',
           'jeem_failed_tracks',
           'jeem_mix_feedback'
         ];

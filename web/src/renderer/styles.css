@@ -2869,6 +2869,33 @@ body.show-source-logo .track-source-logo-badge {
   font-weight: 600;
 }
 .lyrics-container.no-transition .lyric-line,
+.lyrics-return-btn {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%) translateY(8px);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(24, 24, 28, 0.82);
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 20;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.lyrics-return-btn.visible { opacity: 1; pointer-events: auto; transform: translateX(-50%); }
+.lyrics-return-btn:hover { background: rgba(48, 48, 56, 0.9); }
 .lyrics-container.lyrics-wheeling .lyric-line {
   transition: none !important;
   transition-delay: 0s !important;
@@ -9192,6 +9219,8 @@ body.perf .album-side {
   transition: opacity 0.15s ease;
   font-family: inherit;
 }
+/* the button has an invisible layer over its whole area; the artist names inside must sit above it to be clickable */
+#album-detail-artist .artist-link-part { position: relative; z-index: 1; cursor: pointer !important; }
 .album-artist-btn:hover,
 #album-detail-artist:hover {
   text-decoration: underline;
@@ -14844,9 +14873,11 @@ body:not(.mini) .titlebar-controls .titlebar-btn.close-btn {
 #setting-proxy-manager, #setting-desktop-shortcut { display: none !important; }
 
 /* The track panel is opened by clicking the cover in the player bar. */
-.playbar .lyrics-btn-anchor { display: none !important; }
-/* Once the track panel is closed with its X, this button is the way to open it again. */
-body:has(#right-panel.hidden) .playbar .lyrics-btn-anchor { display: inline-flex !important; }
+/* the track info button is always there: it opens and closes the track panel */
+.playbar .lyrics-btn-anchor { display: inline-flex !important; }
+/* open panel: the icon takes the accent colour; the small dot that other active buttons get would sit inside the circle of this icon */
+#btn-toggle-lyrics-panel.active { color: var(--md-sys-color-primary) !important; }
+#btn-toggle-lyrics-panel.active::after, #btn-toggle-lyrics-panel.active::before { display: none !important; }
 
 /* Mixes and the "For you" row are switched off for now. */
 #sp-made-sec { display: none !important; }
@@ -14992,7 +15023,10 @@ body.wave-view:not(.wave-rp-open) #right-panel { display: none !important; }
 /* karaoke view: like and dislike beside the volume */
 #btn-tvk-karaoke-mode { right: 236px !important; }
 #btn-translate-lyrics { right: 288px !important; }
-#btn-translate-lyrics.active { background: rgba(255, 255, 255, 0.2) !important; }
+/* karaoke and translate buttons: the straight slash is drawn when the function is off */
+#btn-tvk-karaoke-mode .karaoke-off-slash, #btn-translate-lyrics .translate-off-slash { display: none; }
+#btn-tvk-karaoke-mode.off .karaoke-off-slash, #btn-translate-lyrics:not(.active) .translate-off-slash { display: block; }
+.tv-karaoke:not(.tv-idle) #btn-tvk-karaoke-mode.off, .tv-karaoke:not(.tv-idle) #btn-translate-lyrics:not(.active) { opacity: .75; }
 #btn-toggle-dislike.hidden { display: none !important; }
 
 /* like and dislike under the volume slider */
@@ -15000,9 +15034,7 @@ body.wave-view:not(.wave-rp-open) #right-panel { display: none !important; }
 .tvk-rate-row .tvk-rate-btn.hidden { display: none !important; }
 .tvk-rate-row .tvk-rate-btn.active { color: var(--md-sys-color-primary, #fff); }
 .tvk-rate-row .tvk-rate-btn.active svg { fill: currentColor; }
-/* karaoke button: no slash; it is highlighted while karaoke is on */
-#btn-tvk-karaoke-mode .karaoke-off-slash { display: none !important; }
-#btn-tvk-karaoke-mode:not(.off) { background: rgba(255, 255, 255, 0.2) !important; }
+
 
 /* platform switch: one highlight that glides from one platform to the next */
 .platform-pill-switch { position: relative; }

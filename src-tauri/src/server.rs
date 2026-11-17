@@ -115,6 +115,7 @@ async fn api(ctx: &Arc<Ctx>, parts: &Parts, q: &HashMap<String, String>, body: B
     let num = |k: &str, d: usize| q.get(k).and_then(|v| v.parse::<usize>().ok()).unwrap_or(d);
     match path {
         "/api/net-check" => ok(json!({ "online": true })),
+        "/api/video-meta" => ok(ytm::video_meta(ctx, &get("id")).await),
         "/api/tools/status" | "/api/tools-status" => ok(tools::status(ctx)),
         "/api/tools/install" | "/api/tools-install" => {
             tauri::async_runtime::spawn(tools::install(ctx.clone()));

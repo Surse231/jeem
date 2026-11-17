@@ -772,6 +772,62 @@ pub async fn page_url_for(ctx: &Arc<Ctx>, id: &str, url: &str, query: &str) -> R
     page_url_for_hint(ctx, id, url, query, None).await
 }
 
+/// The real title and artist of a YouTube video (its own page data), to check that a track is what its audio really is.
+pub async fn video_meta(ctx: &Ctx, id: &str) -> Value {
+    if !valid_video_id(id) {
+        return json!({ "success": false });
+    }
+    // YouTube Music knows the clean title and artist of the video
+    let body = json!({
+        "context": { "client": { "clientName": "WEB_REMIX", "clientVersion": "1.20250101.01.00", "hl": "en", "gl": "US" } },
+        "videoId": id, "isAudioOnly": true
+    });
+    if let Ok(resp) = ctx
+        .client
+        .post("https://music.youtube.com/youtubei/v1/next?prettyPrint=false")
+        .header("Origin", "https://music.youtube.com")
+        .header("Referer", "https://music.youtube.com/")
+        .header("User-Agent", UA)
+        .timeout(Duration::from_secs(8))
+        .json(&body)
+        .send()
+        .await
+    {
+        if let Ok(root) = resp.json::<Value>().await {
+            let mut rows = Vec::new();
+            find_all(&root, "playlistPanelVideoRenderer", &mut rows);
+            if let Some(r) = rows.iter().find(|r| text(r.get("videoId")) == id) {
+                let title = text(r.pointer("/title/runs/0/text")).trim().to_string();
+                let artist = r
+                    .pointer("/longBylineText/runs/0/text")
+                    .or_else(|| r.pointer("/shortBylineText/runs/0/text"))
+                    .map(|v| text(Some(v)).trim().trim_end_matches(" - Topic").to_string())
+                    .unwrap_or_default();
+                if !title.is_empty() && !artist.is_empty() {
+                    return json!({ "success": true, "title": title, "fullTitle": title, "artist": artist });
+                }
+            }
+        }
+    }
+    let url = format!("https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={id}&format=json");
+    let Ok(resp) = ctx.client.get(url).timeout(Duration::from_secs(8)).send().await else { return json!({ "success": false }) };
+    let Ok(v) = resp.json::<Value>().await else { return json!({ "success": false }) };
+    let title = text(v.get("title")).trim().to_string();
+    let author = text(v.get("author_name")).trim().trim_end_matches(" - Topic").to_string();
+    if title.is_empty() {
+        return json!({ "success": false });
+    }
+    // "Artist - Title (Official Video)" -> the title alone, when the artist is in front of it
+    let low = title.to_lowercase();
+    let artist_low = author.to_lowercase();
+    let clean = match title.split_once(" - ") {
+        Some((a, rest)) if !artist_low.is_empty() && (a.to_lowercase().contains(&artist_low) || artist_low.contains(&a.to_lowercase())) => rest.trim().to_string(),
+        _ => title.clone(),
+    };
+    let _ = low;
+    json!({ "success": true, "title": clean, "fullTitle": title, "artist": author })
+}
+
 /// What the listener asked for: the artist, the title and the length, to tell the right recording from a similar one.
 pub struct TrackHint<'a> {
     pub artist: &'a str,
