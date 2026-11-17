@@ -20,6 +20,10 @@ Website: [surse231.github.io/jeem](https://surse231.github.io/jeem/)
 
 Get the latest installer from the [releases page](https://github.com/Surse231/jeem/releases/latest).
 
+## Support
+
+Jeem is free. If you like it, you can thank the author with a [donation](https://www.donationalerts.com/r/surse231).
+
 ## Build from source
 
 Requirements:
