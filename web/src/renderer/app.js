@@ -5288,7 +5288,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const curId = (typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(state.currentTrack) : '') || state.currentTrack.id;
       if (state._skipRecordedFor !== curId) {
         const cur = (el.nativeAudio && typeof el.nativeAudio.currentTime === 'number') ? el.nativeAudio.currentTime : 0;
-        if (cur < 30 && typeof recordWaveSkip === 'function') {
+        if (cur < 30 && typeof recordWaveSkip === 'function' && !(state.favorites || []).some(f => isSameTrack(f, state.currentTrack))) {
           recordWaveSkip(state.currentTrack);
         }
       }
@@ -7478,6 +7478,37 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (el.lyricsContainer) el.lyricsContainer.classList.add('lyrics-wheeling');
       if (!wheelRafId) wheelRafId = requestAnimationFrame(stepLyricsWheel);
     }
+  }
+
+  /* The lines are placed by their measured heights, so they are measured again whenever something could have changed them: the lyrics
+     move between the track panel and the full-screen page, the window or a line changes size (font, karaoke on/off, translation...),
+     or the lines are drawn anew. Without it lines measured at a wrong moment keep a huge space between them (for lyrics without
+     timing there is no change of the current line that would place them again). */
+  if (typeof ResizeObserver !== 'undefined' && typeof MutationObserver !== 'undefined' && el.lyricsContainer) {
+    let relayoutTimer = 0, lastW = 0, lastH = 0;
+    const relayout = () => {
+      if (Array.isArray(state.syncedLyrics) && state.syncedLyrics.length && !lyricsDetached) layoutLyricsCascade(state.lastActiveLyricIdx, true);
+    };
+    // measured a few times: right after a change the lines may still be changing their size
+    const scheduleRelayout = () => {
+      clearTimeout(relayoutTimer);
+      relayoutTimer = setTimeout(() => { relayout(); setTimeout(relayout, 350); setTimeout(relayout, 900); }, 60);
+    };
+    new ResizeObserver(() => {
+      const c = el.lyricsContainer;
+      if (!c) return;
+      const w = c.clientWidth, h = c.clientHeight;
+      if (!w || !h) { lastW = 0; lastH = 0; return; }   // hidden: the next time it is shown it is measured again, even at the same size
+      if (w === lastW && h === lastH) return;
+      lastW = w; lastH = h;
+      scheduleRelayout();
+    }).observe(el.lyricsContainer);
+    const lineObserver = new ResizeObserver(() => scheduleRelayout());
+    new MutationObserver(() => {
+      lineObserver.disconnect();
+      el.lyricsContainer.querySelectorAll('.lyric-line').forEach(l => lineObserver.observe(l));
+      scheduleRelayout();
+    }).observe(el.lyricsContainer, { childList: true });
   }
 
   function resetManualLyricsWheel() {
@@ -9880,7 +9911,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!state._isNaturalEnding && state.myWaveActive && state.currentTrack) {
       const cur = (el.nativeAudio && typeof el.nativeAudio.currentTime === 'number') ? el.nativeAudio.currentTime : 0;
       const alreadyCounted = state._skipRecordedFor && state._skipRecordedFor === ((typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(state.currentTrack) : '') || state.currentTrack.id);
-      if (cur < 30 && !alreadyCounted && typeof recordWaveSkip === 'function') {
+      if (cur < 30 && !alreadyCounted && typeof recordWaveSkip === 'function' && !(state.favorites || []).some(f => isSameTrack(f, state.currentTrack))) {
         recordWaveSkip(state.currentTrack);
         state._skipRecordedFor = (typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(state.currentTrack) : '') || state.currentTrack.id;
       }
@@ -29594,7 +29625,7 @@ function bindCoverHoldZoom(wrapEl) {
     waveSoundFlush();
     if (!prev) return;
     if (natural || (dur > 0 && played >= dur * 0.85)) waveLearnEvent(prev, 1);
-    else if (state.myWaveActive && prev._wave && played < 30) {
+    else if (state.myWaveActive && prev._wave && played < 30 && !(state.favorites || []).some(f => isSameTrack(f, prev))) {
       waveLearnEvent(prev, -1.5);
       const artist = waveMainArtist(prev);
       setTimeout(() => waveDropUpcomingArtist(artist), 0);
