@@ -5284,11 +5284,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       } catch (_) {}
     }
+    if (state.currentTrack && !isSameTrack(state.currentTrack, track) && typeof waveCancelSkip === 'function') waveCancelSkip(track);
     if (!state._isNaturalEnding && state.myWaveActive && state.currentTrack && !isSameTrack(state.currentTrack, track)) {
       const curId = (typeof getTrackCanonicalId === 'function' ? getTrackCanonicalId(state.currentTrack) : '') || state.currentTrack.id;
       if (state._skipRecordedFor !== curId) {
         const cur = (el.nativeAudio && typeof el.nativeAudio.currentTime === 'number') ? el.nativeAudio.currentTime : 0;
-        if (cur < 30 && typeof recordWaveSkip === 'function' && !(state.favorites || []).some(f => isSameTrack(f, state.currentTrack))) {
+        if (cur < 30 && typeof recordWaveSkip === 'function' && !state._backNav && !(state.favorites || []).some(f => isSameTrack(f, state.currentTrack))) {
           recordWaveSkip(state.currentTrack);
         }
       }
@@ -10003,7 +10004,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  // leaving a track with the "previous" button is not a sign that it was disliked
   function playPrev() {
+    state._backNav = true;
+    try { return playPrevInner(); } finally { state._backNav = false; }
+  }
+
+  function playPrevInner() {
     if (syncState && syncState.active) return;
     if (el.nativeAudio && el.nativeAudio.currentTime > 3) {
       el.nativeAudio.currentTime = 0;
@@ -29555,13 +29562,33 @@ function bindCoverHoldZoom(wrapEl) {
     const artist = waveMainArtist(track);
     if (!artist) return;
     const m = waveModelLoad();
-    m.events.push({ a: artist, k: waveTrackKey(track), s: score, t: Date.now(), p: waveDayPart() });
+    m.events.push({ a: artist, k: waveTrackKey(track), s: score, t: Date.now(), p: waveDayPart(), n: track.waveNew ? 1 : 0 });
     // the reaction to a track offered as something new decides how often new music comes
     if (track.waveNew) {
       if (score > 0.5) m.explore.pos += 1;
       else if (score < 0) m.explore.neg += 1;
     }
     waveModelSave(m);
+  }
+
+  // The listener comes back to a track they skipped quickly: they changed their mind, so that skip is cancelled (the later reaction counts as usual).
+  function waveCancelSkip(track) {
+    try {
+      const key = waveTrackKey(track);
+      if (!key) return;
+      const m = waveModelLoad();
+      let at = -1;
+      for (let i = m.events.length - 1; i >= 0; i--) { if (m.events[i].k === key && m.events[i].s === -1.5) { at = i; break; } }
+      if (at < 0) return;
+      const ev = m.events.splice(at, 1)[0];
+      if (ev.n && m.explore.neg > 1) m.explore.neg -= 1;
+      waveModelSave(m);
+      const skips = getWaveSkips();
+      for (let i = skips.length - 1; i >= 0; i--) {
+        if (skips[i].key === key && (skips[i].w || 1) <= 1) { skips.splice(i, 1); break; }
+      }
+      try { localStorage.setItem(WAVE_SKIPS_KEY, JSON.stringify(skips)); } catch (_) {}
+    } catch (_) {}
   }
 
   // the sound of the track that plays, measured four times a second
@@ -29625,7 +29652,7 @@ function bindCoverHoldZoom(wrapEl) {
     waveSoundFlush();
     if (!prev) return;
     if (natural || (dur > 0 && played >= dur * 0.85)) waveLearnEvent(prev, 1);
-    else if (state.myWaveActive && prev._wave && played < 30 && !(state.favorites || []).some(f => isSameTrack(f, prev))) {
+    else if (state.myWaveActive && prev._wave && played < 30 && !state._backNav && !(state.favorites || []).some(f => isSameTrack(f, prev))) {
       waveLearnEvent(prev, -1.5);
       const artist = waveMainArtist(prev);
       setTimeout(() => waveDropUpcomingArtist(artist), 0);
